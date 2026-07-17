@@ -16,7 +16,7 @@ from aiogram.types import (
 from config import TIMEZONE
 from db import ensure_day_rows, get_day_state, get_habits, toggle_habit
 from keyboards import build_habits_keyboard, build_main_keyboard, build_stats_keyboard
-from render import render_day_card
+from render import render_day_card, render_stats_card
 from stats import compute_stats
 
 logger = logging.getLogger(__name__)
@@ -64,8 +64,11 @@ async def btn_stats(message: Message) -> None:
 @router.callback_query(lambda cb: cb.data and cb.data.startswith("stats:"))
 async def cb_stats(callback: CallbackQuery) -> None:
     period = callback.data.split(":")[1]
-    text = await compute_stats(period)
-    await callback.message.answer(text)
+    data = await compute_stats(period)
+    img = render_stats_card(data)
+    await callback.message.answer_photo(
+        photo=BufferedInputFile(img.read(), filename=f"stats_{period}.png"),
+    )
     await callback.answer()
 
 

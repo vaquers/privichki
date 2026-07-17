@@ -5,18 +5,24 @@ from datetime import date, timedelta
 from db import get_pool, get_habits
 
 
-async def compute_stats(period: str) -> str:
+def _monday_of_week(d: date) -> date:
+    """Return Monday of the week containing d."""
+    return d - timedelta(days=d.weekday())
+
+
+async def compute_stats(period: str) -> dict:
+    """Return stats dict for render_stats_card."""
     today = date.today()
 
     if period == "week":
-        start = today - timedelta(days=6)
-        title = "📊 Статистика за неделю"
+        start = _monday_of_week(today)
+        title = "Статистика за неделю"
     elif period == "month":
         start = today - timedelta(days=29)
-        title = "📊 Статистика за месяц"
+        title = "Статистика за месяц"
     else:
         start = None
-        title = "📊 Статистика за всё время"
+        title = "Статистика за всё время"
 
     habits = await get_habits()
     pool = await get_pool()
@@ -41,10 +47,9 @@ async def compute_stats(period: str) -> str:
                 date_filter = "WHERE date >= $1 AND date <= $2"
                 params = [start.isoformat(), today.isoformat()]
             else:
-                return title + "\n\nНет данных."
+                return {"title": title, "habits": [], "perfect_days": 0, "total_days": 0}
 
         habit_count = len(habits)
-        lines = [title, ""]
 
         # perfect days
         rows = await conn.fetch(
@@ -54,6 +59,7 @@ async def compute_stats(period: str) -> str:
         )
         perfect_days = len(rows)
 
+        habit_stats = []
         for h in habits:
             row = await conn.fetchrow(
                 f"SELECT COUNT(*) as cnt FROM daily_log {date_filter} "
@@ -62,15 +68,24 @@ async def compute_stats(period: str) -> str:
             )
             done = row["cnt"]
             pct = round(done / total_days * 100) if total_days else 0
-
             streak = await _calc_streak(conn, h["key"], today)
 
-            lines.append(f"{h['emoji']} {h['name']}")
-            lines.append(f"   {done}/{total_days} дней ({pct}%) | стрик: {streak} 🔥")
-            lines.append("")
+            habit_stats.append({
+                "key": h["key"],
+                "name": h["name"],
+                "emoji": h["emoji"],
+                "done": done,
+                "total": total_days,
+                "pct": pct,
+                "streak": streak,
+            })
 
-        lines.append(f"⭐ Идеальных дней: {perfect_days}/{total_days}")
-        return "\n".join(lines)
+        return {
+            "title": title,
+            "habits": habit_stats,
+            "perfect_days": perfect_days,
+            "total_days": total_days,
+        }
 
 
 async def _calc_streak(conn, habit_key: str, today: date) -> int:
