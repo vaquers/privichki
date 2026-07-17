@@ -15,4 +15,4 @@ FONT_BOLD = BASE_DIR / "assets" / "fonts" / "Inter-Bold.ttf"
 FONT_MEDIUM = BASE_DIR / "assets" / "fonts" / "Inter-Medium.ttf"
 FONT_REGULAR = BASE_DIR / "assets" / "fonts" / "Inter-Regular.ttf"
 
-DB_PATH = BASE_DIR / "habits.db"
+DATABASE_URL: str = os.environ["DATABASE_URL"]
