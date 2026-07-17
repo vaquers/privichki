@@ -138,90 +138,85 @@ def render_day_card(date_str: str, habits: list[dict], state: dict[str, bool]) -
 
 
 def render_stats_card(data: dict) -> BytesIO:
-    """Render stats card PNG matching day card style."""
+    """Render stats card PNG, mobile-friendly large elements."""
     title = data["title"]
     habits = data["habits"]
     perfect_days = data["perfect_days"]
     total_days = data["total_days"]
 
-    STATS_W, STATS_H = 1080, 820
+    STATS_W = 1080
+    left_pad = 60
+    right_pad = 60
+    content_w = STATS_W - left_pad - right_pad
+
+    font_title = ImageFont.truetype(str(FONT_TITLE), 64)
+    font_sub = ImageFont.truetype(str(FONT_SUBTITLE), 44)
+    font_habit = ImageFont.truetype(str(FONT_HABIT_NAME), 44)
+    font_stat = ImageFont.truetype(str(FONT_SUBTITLE), 34)
+    font_small = ImageFont.truetype(str(FONT_TIME), 30)
+
+    # pre-calculate height
+    row_h = 195
+    header_h = 250
+    footer_h = 100
+    STATS_H = header_h + len(habits) * row_h + footer_h
 
     img = Image.new("RGB", (STATS_W, STATS_H), BG_WHITE)
     draw = ImageDraw.Draw(img)
 
-    font_title = ImageFont.truetype(str(FONT_TITLE), 56)
-    font_sub = ImageFont.truetype(str(FONT_SUBTITLE), 36)
-    font_habit = ImageFont.truetype(str(FONT_HABIT_NAME), 32)
-    font_value = ImageFont.truetype(str(FONT_SUBTITLE), 28)
-    font_small = ImageFont.truetype(str(FONT_TIME), 24)
-
-    left_pad = 16
-
     # header
-    y = 30
+    y = 50
     draw.text((left_pad, y), title, font=font_title, fill=TEXT_BLACK)
     title_bbox = draw.textbbox((left_pad, y), title, font=font_title)
-    y = title_bbox[3] + 8
+    y = title_bbox[3] + 12
 
     perfect_text = f"{perfect_days}/{total_days} идеальных дней"
     draw.text((left_pad, y), perfect_text, font=font_sub, fill=TEXT_GRAY)
     sub_bbox = draw.textbbox((left_pad, y), perfect_text, font=font_sub)
-    y = sub_bbox[3] + 50
+    y = sub_bbox[3] + 55
 
     if not habits:
         draw.text((left_pad, y), "Нет данных", font=font_sub, fill=TEXT_GRAY)
     else:
-        bar_max_w = 580
-        row_h = 150
+        bar_h = 28
+        bar_radius = 14
 
         for h in habits:
             key = h["key"]
             color = HABIT_STYLE.get(key, ("", TEXT_BLACK))[1]
             label = HABIT_LABEL.get(key, h["name"])
 
-            # habit name
+            # habit name + percentage on same line
             draw.text((left_pad, y), label, font=font_habit, fill=color)
+            pct_text = f"{h['pct']}%"
+            pct_bbox = draw.textbbox((0, 0), pct_text, font=font_habit)
+            pct_w = pct_bbox[2] - pct_bbox[0]
+            draw.text((left_pad + content_w - pct_w, y), pct_text, font=font_habit, fill=color)
 
-            # stats line: "X/Y дней (Z%) | стрик: N"
-            stat_line = f"{h['done']}/{h['total']} дней ({h['pct']}%)"
-            streak_line = f"стрик: {h['streak']}"
             name_bbox = draw.textbbox((left_pad, y), label, font=font_habit)
-            stat_y = name_bbox[3] + 6
-
-            draw.text((left_pad, stat_y), stat_line, font=font_small, fill=TEXT_GRAY)
-
-            # streak right-aligned to bar end
-            streak_bbox = draw.textbbox((0, 0), streak_line, font=font_small)
-            streak_w = streak_bbox[2] - streak_bbox[0]
-            draw.text((left_pad + bar_max_w - streak_w, stat_y), streak_line, font=font_small, fill=TEXT_GRAY)
 
             # progress bar
-            bar_y = stat_y + 34
-            bar_h = 20
-            bar_radius = 10
-
-            # background
+            bar_y = name_bbox[3] + 14
             draw.rounded_rectangle(
-                [left_pad, bar_y, left_pad + bar_max_w, bar_y + bar_h],
+                [left_pad, bar_y, left_pad + content_w, bar_y + bar_h],
                 radius=bar_radius, fill=(0xE8, 0xE8, 0xED),
             )
-
-            # filled
             if h["pct"] > 0:
-                fill_w = max(bar_h, int(bar_max_w * h["pct"] / 100))
+                fill_w = max(bar_h, int(content_w * h["pct"] / 100))
                 draw.rounded_rectangle(
                     [left_pad, bar_y, left_pad + fill_w, bar_y + bar_h],
                     radius=bar_radius, fill=color,
                 )
 
-            # percentage on bar right
-            pct_text = f"{h['pct']}%"
-            pct_bbox = draw.textbbox((0, 0), pct_text, font=font_value)
-            pct_w = pct_bbox[2] - pct_bbox[0]
-            draw.text(
-                (left_pad + bar_max_w + 16, bar_y - 4),
-                pct_text, font=font_value, fill=color,
-            )
+            # stats line below bar
+            stat_y = bar_y + bar_h + 10
+            stat_line = f"{h['done']}/{h['total']} дней"
+            draw.text((left_pad, stat_y), stat_line, font=font_small, fill=TEXT_GRAY)
+
+            streak_line = f"стрик: {h['streak']} 🔥"
+            streak_bbox = draw.textbbox((0, 0), streak_line, font=font_small)
+            streak_w = streak_bbox[2] - streak_bbox[0]
+            draw.text((left_pad + content_w - streak_w, stat_y), streak_line, font=font_small, fill=TEXT_GRAY)
 
             y += row_h
 
