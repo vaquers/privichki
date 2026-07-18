@@ -1,21 +1,23 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+import zoneinfo
+from datetime import date, datetime, timedelta
 
+from config import TIMEZONE
 from db import get_pool, get_habits
 
 
-def _monday_of_week(d: date) -> date:
-    """Return Monday of the week containing d."""
-    return d - timedelta(days=d.weekday())
+def _today_tz() -> date:
+    """Today's date in configured timezone."""
+    tz = zoneinfo.ZoneInfo(TIMEZONE)
+    return datetime.now(tz).date()
 
 
 async def compute_stats(period: str) -> dict:
-    """Return stats dict for render_stats_card."""
-    today = date.today()
+    today = _today_tz()
 
     if period == "week":
-        start = _monday_of_week(today)
+        start = today - timedelta(days=6)
         title = "Статистика за неделю"
     elif period == "month":
         start = today - timedelta(days=29)
@@ -51,7 +53,6 @@ async def compute_stats(period: str) -> dict:
 
         habit_count = len(habits)
 
-        # perfect days
         rows = await conn.fetch(
             f"SELECT date, SUM(completed) as s FROM daily_log {date_filter} "
             f"GROUP BY date HAVING SUM(completed) = ${len(params) + 1}",

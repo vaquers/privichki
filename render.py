@@ -149,11 +149,18 @@ def render_stats_card(data: dict) -> BytesIO:
     right_pad = 60
     content_w = STATS_W - left_pad - right_pad
 
-    font_title = ImageFont.truetype(str(FONT_TITLE), 64)
     font_sub = ImageFont.truetype(str(FONT_SUBTITLE), 44)
     font_habit = ImageFont.truetype(str(FONT_HABIT_NAME), 44)
-    font_stat = ImageFont.truetype(str(FONT_SUBTITLE), 34)
     font_small = ImageFont.truetype(str(FONT_TIME), 30)
+
+    # auto-size title to fit width
+    title_size = 64
+    font_title = ImageFont.truetype(str(FONT_TITLE), title_size)
+    # use temporary image for measuring
+    _tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    while _tmp.textbbox((0, 0), title, font=font_title)[2] > content_w and title_size > 36:
+        title_size -= 2
+        font_title = ImageFont.truetype(str(FONT_TITLE), title_size)
 
     # pre-calculate height
     row_h = 195
@@ -212,11 +219,6 @@ def render_stats_card(data: dict) -> BytesIO:
             stat_y = bar_y + bar_h + 10
             stat_line = f"{h['done']}/{h['total']} дней"
             draw.text((left_pad, stat_y), stat_line, font=font_small, fill=TEXT_GRAY)
-
-            streak_line = f"стрик: {h['streak']} 🔥"
-            streak_bbox = draw.textbbox((0, 0), streak_line, font=font_small)
-            streak_w = streak_bbox[2] - streak_bbox[0]
-            draw.text((left_pad + content_w - streak_w, stat_y), streak_line, font=font_small, fill=TEXT_GRAY)
 
             y += row_h
 
