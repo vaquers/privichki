@@ -17,7 +17,7 @@ async def compute_stats(period: str) -> dict:
     today = _today_tz()
 
     if period == "week":
-        start = today - timedelta(days=6)
+        start = today - timedelta(days=today.weekday())  # Monday
         title = "Статистика за неделю"
     elif period == "month":
         start = today - timedelta(days=29)
