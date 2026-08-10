@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from aiogram.enums import ButtonStyle
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
+
+
+# Telegram requires button text even when a custom emoji is used as its icon.
+# A zero-width space keeps the habit buttons icon-only without duplicating the
+# custom emoji with its regular Unicode fallback.
+CUSTOM_EMOJI_BUTTON_TEXT = "\u200b"
 
 
 def build_main_keyboard() -> ReplyKeyboardMarkup:
@@ -25,13 +32,13 @@ def build_habits_keyboard(
     sorted_habits = sorted(habits, key=lambda h: h["sort_order"])
     buttons = []
     for h in sorted_habits:
-        btn_kwargs: dict = {
-            "text": h["emoji"],
-            "callback_data": f"toggle:{date}:{h['key']}",
-        }
-        if h.get("custom_emoji_id"):
-            btn_kwargs["icon_custom_emoji_id"] = h["custom_emoji_id"]
-        buttons.append(InlineKeyboardButton(**btn_kwargs))
+        custom_emoji_id = h.get("custom_emoji_id")
+        buttons.append(InlineKeyboardButton(
+            text=CUSTOM_EMOJI_BUTTON_TEXT if custom_emoji_id else h["emoji"],
+            icon_custom_emoji_id=custom_emoji_id,
+            style=ButtonStyle.SUCCESS if state.get(h["key"], False) else None,
+            callback_data=f"toggle:{date}:{h['key']}",
+        ))
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 
