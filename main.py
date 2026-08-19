@@ -6,6 +6,8 @@ from aiogram.client.default import DefaultBotProperties
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from clients_db import init_clients_db
+from clients_handlers import clients_router
 from config import ALLOWED_USER_ID, BOT_TOKEN, DAILY_TIME, TIMEZONE
 from db import has_daily_message, init_db
 from handlers import router, send_day_card
@@ -33,12 +35,14 @@ async def daily_job(bot: Bot) -> None:
 
 async def main() -> None:
     await init_db()
+    await init_clients_db()
 
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
 
     dp.update.outer_middleware(AccessMiddleware())
     dp.include_router(router)
+    dp.include_router(clients_router)
 
     hour, minute = map(int, DAILY_TIME.split(":"))
     scheduler = AsyncIOScheduler()

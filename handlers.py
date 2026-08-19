@@ -6,6 +6,7 @@ from datetime import datetime
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -43,7 +44,8 @@ async def send_day_card(bot: Bot, chat_id: int, date: str) -> None:
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message) -> None:
+async def cmd_start(message: Message, state: FSMContext) -> None:
+    await state.clear()
     await message.answer(
         "Привет! Я твой трекер привычек.\nКаждое утро присылаю карточку дня.",
         reply_markup=build_main_keyboard(),
@@ -52,12 +54,14 @@ async def cmd_start(message: Message) -> None:
 
 
 @router.message(F.text == "Сегодня")
-async def btn_today(message: Message) -> None:
+async def btn_today(message: Message, state: FSMContext) -> None:
+    await state.clear()
     await send_day_card(message.bot, message.chat.id, _today())
 
 
 @router.message(F.text == "Статистика")
-async def btn_stats(message: Message) -> None:
+async def btn_stats(message: Message, state: FSMContext) -> None:
+    await state.clear()
     await message.answer("Выбери период:", reply_markup=build_stats_keyboard())
 
 

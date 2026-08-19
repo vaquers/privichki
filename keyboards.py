@@ -17,7 +17,10 @@ CUSTOM_EMOJI_BUTTON_TEXT = "\u200b"
 
 def build_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Сегодня"), KeyboardButton(text="Статистика")]],
+        keyboard=[
+            [KeyboardButton(text="Сегодня"), KeyboardButton(text="Статистика")],
+            [KeyboardButton(text="Манул")],
+        ],
         resize_keyboard=True,
         is_persistent=True,
     )
