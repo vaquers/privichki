@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from clients_db import row_label
+from clients_db import LEGACY_SEED_COLUMNS, SEED_COLUMNS, row_label
 from clients_keyboards import (
     cell_columns_keyboard,
     columns_list_keyboard,
@@ -34,6 +34,30 @@ def _rows(n: int) -> list[dict]:
 
 def _all_callbacks(keyboard) -> list[str]:
     return [b.callback_data for row in keyboard.inline_keyboard for b in row]
+
+
+class SeedColumnTests(TestCase):
+    def test_seeded_columns_match_the_agreed_set(self) -> None:
+        self.assertEqual(
+            SEED_COLUMNS,
+            [
+                "Компания",
+                "Персональное обращение",
+                "Ответ",
+                "Созвон",
+                "Причина",
+                "Вывод",
+                "Текст обращения",
+                "Текст ответа",
+            ],
+        )
+
+    def test_company_stays_first_because_row_labels_depend_on_it(self) -> None:
+        self.assertEqual(SEED_COLUMNS[0], "Компания")
+
+    def test_legacy_set_is_kept_distinct_for_the_upgrade_check(self) -> None:
+        self.assertNotEqual(SEED_COLUMNS, LEGACY_SEED_COLUMNS)
+        self.assertEqual(len(set(SEED_COLUMNS)), len(SEED_COLUMNS))
 
 
 class MainKeyboardTests(TestCase):

@@ -4,7 +4,21 @@ from db import get_pool
 
 # Default columns created on first run. Order matters: the first column is used
 # as the row label in selection menus.
-SEED_COLUMNS = ["Компания", "Контакт", "Статус", "Комментарий"]
+SEED_COLUMNS = [
+    "Компания",
+    "Персональное обращение",
+    "Ответ",
+    "Созвон",
+    "Причина",
+    "Вывод",
+    "Текст обращения",
+    "Текст ответа",
+]
+
+# Columns seeded by earlier versions. A database still holding exactly these and
+# no companies is re-seeded with SEED_COLUMNS; anything else is left untouched so
+# that hand-made columns and real data are never dropped on startup.
+LEGACY_SEED_COLUMNS = ["Компания", "Контакт", "Статус", "Комментарий"]
 
 
 async def init_clients_db() -> None:
@@ -31,13 +45,27 @@ async def init_clients_db() -> None:
                 PRIMARY KEY (company_id, column_id)
             )
         """)
-        row = await conn.fetchrow("SELECT COUNT(*) AS cnt FROM client_columns")
-        if row["cnt"] == 0:
-            for i, name in enumerate(SEED_COLUMNS):
-                await conn.execute(
-                    "INSERT INTO client_columns (name, sort_order) VALUES ($1, $2)",
-                    name, i,
-                )
+        await _seed_columns(conn)
+
+
+async def _seed_columns(conn) -> None:
+    """Install SEED_COLUMNS on a fresh table, or upgrade an untouched legacy one."""
+    rows = await conn.fetch("SELECT name FROM client_columns ORDER BY sort_order, id")
+    existing = [r["name"] for r in rows]
+
+    if existing == SEED_COLUMNS:
+        return
+    if existing:
+        if existing != LEGACY_SEED_COLUMNS:
+            return  # customised by hand -- not ours to rewrite
+        if await conn.fetchval("SELECT COUNT(*) FROM client_companies"):
+            return  # real data present -- keep the columns it was entered under
+        await conn.execute("DELETE FROM client_columns")
+
+    for i, name in enumerate(SEED_COLUMNS):
+        await conn.execute(
+            "INSERT INTO client_columns (name, sort_order) VALUES ($1, $2)", name, i
+        )
 
 
 # --- read ---
