@@ -12,6 +12,7 @@ import clients_db as cdb
 from clients_keyboards import (
     cell_columns_keyboard,
     columns_keyboard,
+    close_keyboard,
     columns_list_keyboard,
     companies_keyboard,
     confirm_keyboard,
@@ -21,7 +22,8 @@ from clients_keyboards import (
     move_company_keyboard,
     table_keyboard,
 )
-from clients_render import build_table_html, paginate
+from clients_render import build_company_html, build_table_html, paginate_rows
+from keyboards import MENU_LABELS
 
 logger = logging.getLogger(__name__)
 clients_router = Router(name="clients")
@@ -41,8 +43,10 @@ class ClientsSG(StatesGroup):
 
 async def _table_html(page: int) -> tuple[str, int, int]:
     columns, rows = await cdb.get_table()
-    page_rows, page, pages = paginate(rows, page)
-    html = build_table_html(columns, page_rows, page, pages, total_rows=len(rows))
+    page_rows, page, pages, start = paginate_rows(columns, rows, page)
+    html = build_table_html(
+        columns, page_rows, page, pages, total_rows=len(rows), start=start
+    )
     return html, page, pages
 
 
@@ -220,6 +224,19 @@ async def cb_clients(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Отменено")
         return
 
+    # --- opened from the day card after a site was ticked off ---
+    if action == "quickadd":
+        await send_table(bot, chat_id, state, page=0)
+        columns = await cdb.get_columns()
+        if not columns:
+            await callback.answer("Сначала добавь колонку", show_alert=True)
+            return
+        await state.set_state(ClientsSG.add_company)
+        await state.update_data(columns=columns, idx=0, values={})
+        await _ask_next_company_field(bot, chat_id, state)
+        await callback.answer()
+        return
+
     # --- add company ---
     if action == "add":
         columns = await cdb.get_columns()
@@ -246,6 +263,37 @@ async def cb_clients(callback: CallbackQuery, state: FSMContext) -> None:
     if action == "done":
         await _finish(bot, state)
         await callback.answer("Готово")
+        return
+
+    # --- company card: every value in full ---
+    if action == "show":
+        columns, rows = await cdb.get_table()
+        if len(parts) == 2:
+            await _set_markup(callback, companies_keyboard(rows, columns, "cl:show", "cl:root"))
+            await callback.answer()
+            return
+        company_id = int(parts[2])
+        row = next((r for r in rows if r["id"] == company_id), None)
+        if row is None:
+            await callback.answer("Не найдено", show_alert=True)
+            return
+        number = next(i for i, r in enumerate(rows) if r["id"] == company_id) + 1
+        chunks = build_company_html(columns, row, number)
+        for i, chunk in enumerate(chunks):
+            await bot.send_rich_message(
+                chat_id=chat_id,
+                rich_message=InputRichMessage(html=chunk, skip_entity_detection=True),
+                reply_markup=close_keyboard() if i == len(chunks) - 1 else None,
+            )
+        await callback.answer()
+        return
+
+    if action == "close":
+        try:
+            await callback.message.delete()
+        except TelegramBadRequest:
+            pass
+        await callback.answer()
         return
 
     # --- cell editing ---
@@ -401,13 +449,13 @@ async def _consume(message: Message) -> str:
     return text
 
 
-@clients_router.message(ClientsSG.add_company)
+@clients_router.message(ClientsSG.add_company, ~F.text.in_(MENU_LABELS))
 async def input_add_company(message: Message, state: FSMContext) -> None:
     value = await _consume(message)
     await _store_company_field(message.bot, message.chat.id, state, value)
 
 
-@clients_router.message(ClientsSG.edit_cell)
+@clients_router.message(ClientsSG.edit_cell, ~F.text.in_(MENU_LABELS))
 async def input_edit_cell(message: Message, state: FSMContext) -> None:
     value = await _consume(message)
     data = await state.get_data()
@@ -415,7 +463,7 @@ async def input_edit_cell(message: Message, state: FSMContext) -> None:
     await _finish(message.bot, state)
 
 
-@clients_router.message(ClientsSG.add_column)
+@clients_router.message(ClientsSG.add_column, ~F.text.in_(MENU_LABELS))
 async def input_add_column(message: Message, state: FSMContext) -> None:
     name = await _consume(message)
     if not name:
@@ -435,7 +483,7 @@ async def input_add_column(message: Message, state: FSMContext) -> None:
     await _ask_next_column_fill(message.bot, message.chat.id, state)
 
 
-@clients_router.message(ClientsSG.rename_column)
+@clients_router.message(ClientsSG.rename_column, ~F.text.in_(MENU_LABELS))
 async def input_rename_column(message: Message, state: FSMContext) -> None:
     name = await _consume(message)
     if not name:
@@ -445,7 +493,7 @@ async def input_rename_column(message: Message, state: FSMContext) -> None:
     await _finish(message.bot, state)
 
 
-@clients_router.message(ClientsSG.fill_column)
+@clients_router.message(ClientsSG.fill_column, ~F.text.in_(MENU_LABELS))
 async def input_fill_column(message: Message, state: FSMContext) -> None:
     value = await _consume(message)
     data = await state.get_data()

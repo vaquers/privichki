@@ -16,7 +16,10 @@ def _btn(text: str, data: str) -> InlineKeyboardButton:
 
 
 def table_keyboard(page: int = 0, pages: int = 1) -> InlineKeyboardMarkup:
-    rows = [[_btn("➕ Компания", "cl:add"), _btn("✏️ Редактировать", "cl:edit")]]
+    rows = [
+        [_btn("➕ Компания", "cl:add"), _btn("✏️ Редактировать", "cl:edit")],
+        [_btn("🔍 Открыть компанию", "cl:show")],
+    ]
     if pages > 1:
         rows.append([
             _btn("◀️", f"cl:p:{page - 1}" if page > 0 else "cl:noop"),
@@ -98,3 +101,7 @@ def input_keyboard(skip: bool = True, finish: bool = False) -> InlineKeyboardMar
     rows = [row] if row else []
     rows.append([_btn("✖️ Отмена", "cl:cancel")])
     return _kb(rows)
+
+
+def close_keyboard() -> InlineKeyboardMarkup:
+    return _kb([[_btn("✖️ Закрыть", "cl:close")]])

@@ -3,13 +3,24 @@ from __future__ import annotations
 import asyncpg
 
 from config import DATABASE_URL
+from schedule import dumps, every_day, habits_for_date
 
-# (key, name, icon_path, emoji, target_hours, sort_order, custom_emoji_id)
+# (key, name, icon_path, emoji, sort_order, custom_emoji_id, schedule)
+# The schedule maps weekday (Monday = 0) to the subtitle shown that day. A day
+# missing from the map means the habit is not shown at all.
 SEED_HABITS = [
-    ("math", "Математика", "assets/icons/math.png", "➗", 2, 0, "5388947482640162600"),
-    ("dev", "Разработка сайтов", "assets/icons/dev.png", "💻", 2, 1, "5388815249187053647"),
-    ("sport", "Спорт", "assets/icons/sport.png", "🏋️", 2, 2, "5390842774398481198"),
-    ("economics", "Экономика", "assets/icons/economics.png", "📈", 2, 3, "5388832605149893738"),
+    ("math", "Математика", "assets/icons/math.png", "➗", 0, "5388947482640162600",
+     {"0": "репет", "1": "1/3 дз", "3": "1/3 дз", "5": "1/3 дз"}),
+    ("dev", "Разработка сайтов", "assets/icons/dev.png", "💻", 1, "5388815249187053647",
+     every_day("1 сайт")),
+    ("sport", "Спорт", "assets/icons/sport.png", "🏋️", 2, "5390842774398481198",
+     every_day("тренировка")),
+    ("economics", "Экономика", "assets/icons/economics.png", "📈", 3, "5388832605149893738",
+     every_day("пол темы")),
+    ("shower", "Душ", "assets/icons/shower.png", "🚿", 4, None,
+     every_day("холодный")),
+    ("sleep", "Сон", "assets/icons/sleep.png", "😴", 5, None,
+     every_day("8 часов")),
 ]
 
 _pool: asyncpg.Pool | None = None
@@ -45,12 +56,29 @@ async def init_db() -> None:
                 PRIMARY KEY (date, habit_key)
             )
         """)
-        for h in SEED_HABITS:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS skipped_days (
+                date TEXT PRIMARY KEY,
+                reason TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        # Added after the first release: the weekly schedule and its per-day
+        # subtitles replace the fixed "N часов" caption.
+        await conn.execute("ALTER TABLE habits ADD COLUMN IF NOT EXISTS schedule TEXT")
+        await conn.execute("ALTER TABLE habits ALTER COLUMN target_hours DROP NOT NULL")
+
+        for key, name, icon, emoji, order, emoji_id, sched in SEED_HABITS:
+            # The schedule is only written when the row has none, so edits made
+            # later are never overwritten on restart.
             await conn.execute(
-                """INSERT INTO habits (key, name, icon_path, emoji, target_hours, sort_order, custom_emoji_id)
+                """INSERT INTO habits
+                       (key, name, icon_path, emoji, sort_order, custom_emoji_id, schedule)
                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                   ON CONFLICT (key) DO UPDATE SET custom_emoji_id = $7""",
-                *h,
+                   ON CONFLICT (key) DO UPDATE SET
+                       custom_emoji_id = EXCLUDED.custom_emoji_id,
+                       sort_order = EXCLUDED.sort_order,
+                       schedule = COALESCE(habits.schedule, EXCLUDED.schedule)""",
+                key, name, icon, emoji, order, emoji_id, dumps(sched),
             )
 
 
@@ -71,14 +99,53 @@ async def get_day_state(date: str) -> dict[str, bool]:
 
 
 async def ensure_day_rows(date: str) -> None:
+    """Create a log row for every habit scheduled on that date.
+
+    The rows themselves are the record of what was expected that day, which is
+    what the statistics count against.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        habits = await get_habits()
-        for h in habits:
+        for h in habits_for_date(await get_habits(), date):
             await conn.execute(
                 "INSERT INTO daily_log (date, habit_key) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                 date, h["key"],
             )
+
+
+async def get_day_habits(date: str) -> list[dict]:
+    """Habits scheduled on that date, with the day's subtitle attached."""
+    return habits_for_date(await get_habits(), date)
+
+
+# --- skipped days -----------------------------------------------------------
+
+async def set_day_skipped(date: str, skipped: bool, reason: str = "") -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if skipped:
+            await conn.execute(
+                "INSERT INTO skipped_days (date, reason) VALUES ($1, $2) "
+                "ON CONFLICT (date) DO UPDATE SET reason = $2",
+                date, reason,
+            )
+        else:
+            await conn.execute("DELETE FROM skipped_days WHERE date = $1", date)
+
+
+async def is_day_skipped(date: str) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM skipped_days WHERE date = $1)", date
+        )
+
+
+async def get_skipped_days() -> set[str]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT date FROM skipped_days")
+        return {r["date"] for r in rows}
 
 
 async def toggle_habit(date: str, habit_key: str) -> bool:

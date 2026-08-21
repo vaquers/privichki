@@ -10,11 +10,12 @@ from clients_keyboards import (
     table_keyboard,
 )
 from clients_render import (
-    ROWS_PER_PAGE,
+    MAX_ROWS_PER_PAGE,
     SAFE_HTML_LEN,
     _plural,
+    build_company_html,
     build_table_html,
-    paginate,
+    paginate_rows,
 )
 from keyboards import build_main_keyboard
 
@@ -71,8 +72,8 @@ class MainKeyboardTests(TestCase):
 class TableKeyboardTests(TestCase):
     def test_single_page_has_no_pager(self) -> None:
         kb = table_keyboard(page=0, pages=1)
-        self.assertEqual(len(kb.inline_keyboard), 1)
-        self.assertEqual(_all_callbacks(kb), ["cl:add", "cl:edit"])
+        self.assertEqual(len(kb.inline_keyboard), 2)
+        self.assertEqual(_all_callbacks(kb), ["cl:add", "cl:edit", "cl:show"])
 
     def test_pager_appears_and_clamps_at_edges(self) -> None:
         first = _all_callbacks(table_keyboard(page=0, pages=3))
@@ -84,8 +85,9 @@ class TableKeyboardTests(TestCase):
         self.assertIn("cl:p:2", middle)
 
         last = table_keyboard(page=2, pages=3)
-        self.assertEqual(last.inline_keyboard[1][2].callback_data, "cl:noop")
-        self.assertEqual(last.inline_keyboard[1][1].text, "3/3")
+        pager = last.inline_keyboard[-1]
+        self.assertEqual(pager[2].callback_data, "cl:noop")
+        self.assertEqual(pager[1].text, "3/3")
 
 
 class SelectionKeyboardTests(TestCase):
@@ -133,18 +135,94 @@ class CallbackDataTests(TestCase):
 
 class PaginateTests(TestCase):
     def test_empty_input_yields_one_page(self) -> None:
-        rows, page, pages = paginate([], 0)
-        self.assertEqual((rows, page, pages), ([], 0, 1))
+        self.assertEqual(paginate_rows(COLUMNS, [], 0), ([], 0, 1, 0))
 
-    def test_splits_and_clamps_out_of_range_pages(self) -> None:
-        data = _rows(ROWS_PER_PAGE * 2 + 1)
-        self.assertEqual(paginate(data, 0)[2], 3)
-        self.assertEqual(len(paginate(data, 0)[0]), ROWS_PER_PAGE)
-        self.assertEqual(len(paginate(data, 2)[0]), 1)
+    def test_short_rows_are_capped_by_row_count(self) -> None:
+        rows = _rows(MAX_ROWS_PER_PAGE * 2)
+        page_rows, page, pages, start = paginate_rows(COLUMNS, rows, 0)
+        self.assertEqual(len(page_rows), MAX_ROWS_PER_PAGE)
+        self.assertEqual((page, pages, start), (0, 2, 0))
 
-        # beyond the last page and before the first both clamp
-        self.assertEqual(paginate(data, 99)[1], 2)
-        self.assertEqual(paginate(data, -5)[1], 0)
+    def test_start_index_tracks_variable_page_sizes(self) -> None:
+        rows = _rows(MAX_ROWS_PER_PAGE + 3)
+        _, _, _, start = paginate_rows(COLUMNS, rows, 1)
+        self.assertEqual(start, MAX_ROWS_PER_PAGE)
+
+    def test_long_rows_reduce_the_page_size_instead_of_being_cut(self) -> None:
+        long_rows = [
+            {"id": i, "sort_order": i, "values": {1: "О" * 3000, 2: "и" * 3000}}
+            for i in range(6)
+        ]
+        page_rows, _, pages, _ = paginate_rows(COLUMNS, long_rows, 0)
+        self.assertLess(len(page_rows), MAX_ROWS_PER_PAGE)
+        self.assertGreater(pages, 1)
+        # every row still lands on exactly one page
+        seen = sum(len(paginate_rows(COLUMNS, long_rows, p)[0]) for p in range(pages))
+        self.assertEqual(seen, len(long_rows))
+
+    def test_out_of_range_pages_clamp(self) -> None:
+        rows = _rows(MAX_ROWS_PER_PAGE + 1)
+        self.assertEqual(paginate_rows(COLUMNS, rows, 99)[1], 1)
+        self.assertEqual(paginate_rows(COLUMNS, rows, -5)[1], 0)
+
+
+class NoTruncationTests(TestCase):
+    def test_a_long_value_is_shown_in_full_in_the_table(self) -> None:
+        text = "Здравствуйте, пишу по поводу сотрудничества. " * 6
+        rows = [{"id": 1, "sort_order": 0, "values": {1: text, 2: "x"}}]
+        page_rows, page, pages, start = paginate_rows(COLUMNS, rows, 0)
+        html = build_table_html(COLUMNS, page_rows, page, pages, 1, start)
+        self.assertIn(text.strip(), html)
+        self.assertNotIn("…", html)
+
+    def test_a_single_oversized_row_is_clipped_but_still_renders(self) -> None:
+        rows = [{"id": 1, "sort_order": 0, "values": {1: "О" * 40000, 2: "и" * 40000}}]
+        page_rows, page, pages, start = paginate_rows(COLUMNS, rows, 0)
+        self.assertEqual(len(page_rows), 1)
+        html = build_table_html(COLUMNS, page_rows, page, pages, 1, start)
+        self.assertLessEqual(len(html), SAFE_HTML_LEN)
+        self.assertIn("…", html)
+
+
+class CompanyCardTests(TestCase):
+    def test_card_shows_every_column_in_full(self) -> None:
+        text = "Очень длинный текст обращения. " * 20
+        row = {"id": 1, "values": {1: "ООО «Ромашка»", 2: text}}
+        chunks = build_company_html(COLUMNS, row, 1)
+        joined = "".join(chunks)
+        self.assertIn("ООО «Ромашка»", joined)
+        self.assertIn(text.strip(), joined)
+        self.assertNotIn("…", joined)
+
+    def test_short_values_stay_inline_and_long_ones_are_quoted(self) -> None:
+        row = {"id": 1, "values": {1: "Да", 2: "длинно " * 30}}
+        html = "".join(build_company_html(COLUMNS, row, 1))
+        self.assertIn("<b>Компания</b>: Да", html)
+        self.assertIn("<blockquote>", html)
+
+    def test_missing_values_render_as_a_dash(self) -> None:
+        html = "".join(build_company_html(COLUMNS, {"id": 1, "values": {}}, 1))
+        self.assertIn("<b>Контакт</b>: —", html)
+
+    def test_line_breaks_survive_as_paragraphs(self) -> None:
+        row = {"id": 1, "values": {2: "первая строка\nвторая строка\n\nтретья"}}
+        html = "".join(build_company_html(COLUMNS, row, 1))
+        self.assertIn("<p>первая строка</p>", html)
+        self.assertIn("<p>вторая строка</p>", html)
+        self.assertIn("<p>третья</p>", html)
+
+    def test_card_is_split_when_it_would_be_too_long(self) -> None:
+        row = {"id": 1, "values": {1: "О" * 6000, 2: "и" * 6000}}
+        chunks = build_company_html(COLUMNS, row, 1)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), SAFE_HTML_LEN * 2)
+
+    def test_card_escapes_user_input(self) -> None:
+        row = {"id": 1, "values": {1: "<script>", 2: "a & b"}}
+        html = "".join(build_company_html(COLUMNS, row, 1))
+        self.assertNotIn("<script>", html)
+        self.assertIn("&lt;script&gt;", html)
 
 
 class RowLabelTests(TestCase):
@@ -172,10 +250,10 @@ class TableHtmlTests(TestCase):
         self.assertTrue(html.startswith("<h3>Клиенты</h3>"))
 
     def test_row_numbers_continue_across_pages(self) -> None:
-        rows = _rows(ROWS_PER_PAGE + 2)
-        page_rows, page, pages = paginate(rows, 1)
-        html = build_table_html(COLUMNS, page_rows, page, pages, total_rows=len(rows))
-        self.assertIn(f'<td align="right">{ROWS_PER_PAGE + 1}</td>', html)
+        rows = _rows(MAX_ROWS_PER_PAGE + 2)
+        page_rows, page, pages, start = paginate_rows(COLUMNS, rows, 1)
+        html = build_table_html(COLUMNS, page_rows, page, pages, len(rows), start)
+        self.assertIn(f'<td align="right">{MAX_ROWS_PER_PAGE + 1}</td>', html)
         self.assertIn(f"стр. 2/{pages}", html)
 
     def test_blank_values_render_as_a_dash(self) -> None:
@@ -197,20 +275,9 @@ class TableHtmlTests(TestCase):
 
     def test_caption_counts_all_rows_not_just_the_page(self) -> None:
         rows = _rows(25)
-        page_rows, page, pages = paginate(rows, 0)
-        html = build_table_html(COLUMNS, page_rows, page, pages, total_rows=len(rows))
+        page_rows, page, pages, start = paginate_rows(COLUMNS, rows, 0)
+        html = build_table_html(COLUMNS, page_rows, page, pages, len(rows), start)
         self.assertIn("25 компаний", html)
-
-    def test_long_values_are_clipped_to_stay_under_the_size_budget(self) -> None:
-        wide = [{"id": i, "name": f"Колонка {i}", "sort_order": i} for i in range(8)]
-        rows = [
-            {"id": i, "sort_order": i, "values": {c["id"]: "О" * 400 for c in wide}}
-            for i in range(ROWS_PER_PAGE)
-        ]
-        html = build_table_html(wide, rows, 0, 1, total_rows=len(rows))
-        self.assertLessEqual(len(html), SAFE_HTML_LEN)
-        self.assertIn("…", html)
-        self.assertEqual(html.count("<tr>"), ROWS_PER_PAGE + 1)   # no rows dropped
 
     def test_whitespace_inside_cells_is_collapsed(self) -> None:
         rows = [{"id": 1, "values": {1: "Ромашка\n\nООО", 2: "a   b"}}]
