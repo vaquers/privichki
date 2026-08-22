@@ -60,7 +60,7 @@ def build_habits_keyboard(
 
     rows = [buttons[i:i + GRID_COLS] for i in range(0, len(buttons), GRID_COLS)]
     rows.append([InlineKeyboardButton(
-        text="↩️ Вернуть день" if skipped else "🚫 Пропустить день",
+        text="Вернуть день" if skipped else "Пропустить день",
         callback_data=f"skip:{date}:{0 if skipped else 1}",
     )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
