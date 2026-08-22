@@ -123,7 +123,8 @@ class SeedTests(TestCase):
 
 class KeyboardTests(TestCase):
     def _habits(self, n: int) -> list[dict]:
-        return [{"key": f"h{i}", "emoji": "✅", "sort_order": i, "custom_emoji_id": None}
+        return [{"key": f"h{i}", "name": f"Привычка {i}", "emoji": "✅",
+                 "sort_order": i, "custom_emoji_id": None}
                 for i in range(n)]
 
     def test_buttons_wrap_into_rows_of_three(self) -> None:

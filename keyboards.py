@@ -9,10 +9,17 @@ from aiogram.types import (
 )
 
 
-# Telegram requires button text even when a custom emoji is used as its icon.
-# A zero-width space keeps the habit buttons icon-only without duplicating the
-# custom emoji with its regular Unicode fallback.
-CUSTOM_EMOJI_BUTTON_TEXT = "\u200b"
+# The custom emoji is drawn before the button text and Telegram rejects empty
+# text, so an icon-only button is always left of centre by half that gap. Short
+# labels make the icon read as a prefix instead of a misaligned icon.
+BUTTON_LABEL = {
+    "math": "Матем",
+    "dev": "Сайты",
+    "sport": "Спорт",
+    "economics": "Эконом",
+    "shower": "Душ",
+    "sleep": "Сон",
+}
 
 # Reply-keyboard labels. Input flows must not swallow these, otherwise a
 # half-finished flow traps every button press.
@@ -40,14 +47,13 @@ def build_habits_keyboard(
     state: dict[str, bool],
     skipped: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Emoji-only buttons for the day's habits, in rows matching the card grid."""
+    """Habit buttons for the day, in rows matching the card grid."""
     sorted_habits = sorted(habits, key=lambda h: h["sort_order"])
     buttons = []
     for h in sorted_habits:
-        custom_emoji_id = h.get("custom_emoji_id")
         buttons.append(InlineKeyboardButton(
-            text=CUSTOM_EMOJI_BUTTON_TEXT if custom_emoji_id else h["emoji"],
-            icon_custom_emoji_id=custom_emoji_id,
+            text=BUTTON_LABEL.get(h["key"], h["name"]),
+            icon_custom_emoji_id=h.get("custom_emoji_id"),
             style=ButtonStyle.SUCCESS if state.get(h["key"], False) else None,
             callback_data=f"toggle:{date}:{h['key']}",
         ))
