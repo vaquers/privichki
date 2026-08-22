@@ -21,15 +21,15 @@ CARDS_DIR = BASE_DIR / "assets" / "cards"
 CLEAR_IMG = CARDS_DIR / "clear.jpg"
 
 # per-habit: colored card path + text color
-# key -> (card image file, text colour). A None image means the card is drawn
-# as a flat plate in the habit colour -- used until real art exists.
+# key -> (card image file, text colour). A None image falls back to a flat
+# plate in the habit colour.
 HABIT_STYLE: dict[str, tuple[str | None, tuple[int, int, int]]] = {
     "math":      ("math.png",    (0x00, 0x88, 0xFF)),  # #0088FF
     "dev":       ("sites.png",   (0x61, 0x55, 0xF5)),  # #6155F5
     "sport":     ("sport.png",   (0x34, 0xC7, 0x59)),  # #34C759
     "economics": ("economy.png", (0xFF, 0x8D, 0x28)),  # #FF8D28
-    "shower":    (None,          (0x06, 0xB6, 0xD4)),  # #06B6D4
-    "sleep":     (None,          (0x64, 0x74, 0x8B)),  # #64748B
+    "shower":    ("shower.png",  (0x06, 0xB6, 0xD4)),  # #06B6D4
+    "sleep":     ("sleep.png",   (0x64, 0x74, 0x8B)),  # #64748B
 }
 
 HABIT_LABEL: dict[str, str] = {

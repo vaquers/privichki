@@ -104,6 +104,15 @@ class SeedTests(TestCase):
         self.assertEqual(by_key["shower"][6]["3"], "холодный")
         self.assertEqual(by_key["sleep"][6]["3"], "8 часов")
 
+    def test_every_habit_has_a_custom_emoji(self) -> None:
+        # An empty id makes the button render as a zero-width space, i.e. blank.
+        missing = [h[0] for h in SEED_HABITS if not h[5]]
+        self.assertEqual(missing, [])
+
+    def test_custom_emoji_ids_are_unique(self) -> None:
+        ids = [h[5] for h in SEED_HABITS]
+        self.assertEqual(len(set(ids)), len(ids))
+
     def test_week_adds_up_to_39_marks(self) -> None:
         habits = [{"schedule": dumps(h[6]), "sort_order": i, "key": h[0]}
                   for i, h in enumerate(SEED_HABITS)]

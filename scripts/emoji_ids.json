@@ -2,21 +2,31 @@
   {
     "index": 1,
     "emoji": "💻",
-    "custom_emoji_id": "5388815249187053647"
+    "custom_emoji_id": "5208818817693687314"
   },
   {
     "index": 2,
-    "emoji": "📈",
-    "custom_emoji_id": "5388832605149893738"
+    "emoji": "📊",
+    "custom_emoji_id": "5208736869717680376"
   },
   {
     "index": 3,
-    "emoji": "🏃",
-    "custom_emoji_id": "5390842774398481198"
+    "emoji": "✖️",
+    "custom_emoji_id": "5210892256105504887"
   },
   {
     "index": 4,
-    "emoji": "➗",
-    "custom_emoji_id": "5388947482640162600"
+    "emoji": "🚿",
+    "custom_emoji_id": "5208823576517453495"
+  },
+  {
+    "index": 5,
+    "emoji": "💤",
+    "custom_emoji_id": "5211227650101651587"
+  },
+  {
+    "index": 6,
+    "emoji": "🏋",
+    "custom_emoji_id": "5208527451407294933"
   }
 ]

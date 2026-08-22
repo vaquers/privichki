@@ -17,7 +17,8 @@ if not BOT_TOKEN:
     print("ERROR: BOT_TOKEN not found in .env")
     sys.exit(1)
 
-SET_NAME = "MajkVazovskij36"
+# Pass a set name as the first argument to read a different pack.
+SET_NAME = sys.argv[1] if len(sys.argv) > 1 else "MajkVazovskij36"
 URL = f"https://api.telegram.org/bot{BOT_TOKEN}/getStickerSet?name={SET_NAME}"
 
 try:

@@ -6,20 +6,22 @@ from config import DATABASE_URL
 from schedule import dumps, every_day, habits_for_date
 
 # (key, name, icon_path, emoji, sort_order, custom_emoji_id, schedule)
+# custom_emoji_id values come from the t.me/addemoji/vaquers_privichki pack;
+# re-read them with scripts/fetch_emoji_ids.py vaquers_privichki
 # The schedule maps weekday (Monday = 0) to the subtitle shown that day. A day
 # missing from the map means the habit is not shown at all.
 SEED_HABITS = [
-    ("math", "Математика", "assets/icons/math.png", "➗", 0, "5388947482640162600",
+    ("math", "Математика", "assets/icons/math.png", "➗", 0, "5210892256105504887",
      {"0": "репет", "1": "1/3 дз", "3": "1/3 дз", "5": "1/3 дз"}),
-    ("dev", "Разработка сайтов", "assets/icons/dev.png", "💻", 1, "5388815249187053647",
+    ("dev", "Разработка сайтов", "assets/icons/dev.png", "💻", 1, "5208818817693687314",
      every_day("1 сайт")),
-    ("sport", "Спорт", "assets/icons/sport.png", "🏋️", 2, "5390842774398481198",
+    ("sport", "Спорт", "assets/icons/sport.png", "🏋️", 2, "5208527451407294933",
      every_day("тренировка")),
-    ("economics", "Экономика", "assets/icons/economics.png", "📈", 3, "5388832605149893738",
+    ("economics", "Экономика", "assets/icons/economics.png", "📈", 3, "5208736869717680376",
      every_day("пол темы")),
-    ("shower", "Душ", "assets/icons/shower.png", "🚿", 4, None,
+    ("shower", "Душ", "assets/icons/shower.png", "🚿", 4, "5208823576517453495",
      every_day("холодный")),
-    ("sleep", "Сон", "assets/icons/sleep.png", "😴", 5, None,
+    ("sleep", "Сон", "assets/icons/sleep.png", "💤", 5, "5211227650101651587",
      every_day("8 часов")),
 ]
 
