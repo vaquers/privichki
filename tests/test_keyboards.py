@@ -54,7 +54,7 @@ class BuildHabitsKeyboardTests(TestCase):
 
         self.assertEqual({h[0] for h in SEED_HABITS}, set(BUTTON_LABEL))
 
-    def test_completed_habit_has_success_style(self) -> None:
+    def test_completed_habit_is_highlighted_in_blue(self) -> None:
         keyboard = build_habits_keyboard(
             "2026-08-17",
             self.habits,
@@ -62,5 +62,5 @@ class BuildHabitsKeyboardTests(TestCase):
         )
         dev, sport = self._habit_buttons(keyboard)
 
-        self.assertEqual(dev.style, ButtonStyle.SUCCESS)
+        self.assertEqual(dev.style, ButtonStyle.PRIMARY)
         self.assertIsNone(sport.style)

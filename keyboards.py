@@ -54,7 +54,7 @@ def build_habits_keyboard(
         buttons.append(InlineKeyboardButton(
             text=BUTTON_LABEL.get(h["key"], h["name"]),
             icon_custom_emoji_id=h.get("custom_emoji_id"),
-            style=ButtonStyle.SUCCESS if state.get(h["key"], False) else None,
+            style=ButtonStyle.PRIMARY if state.get(h["key"], False) else None,
             callback_data=f"toggle:{date}:{h['key']}",
         ))
 
