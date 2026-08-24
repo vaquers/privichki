@@ -20,6 +20,7 @@ ALIGN_LEFT = "left"
 ALIGN_RIGHT = "right"
 
 EMPTY_CELL = "—"
+VIDEO_CELL = "🎥 есть"
 
 
 def _plural(n: int, one: str, few: str, many: str) -> str:
@@ -48,11 +49,22 @@ def _value(row: dict, column: dict) -> str:
     return (row["values"].get(column["id"]) or "").strip()
 
 
+def _display(row: dict, column: dict, cap: int | None) -> str:
+    """What the cell shows. A video holds a Telegram file id, never shown raw."""
+    from clients_db import is_video
+
+    value = _value(row, column)
+    if not value:
+        return EMPTY_CELL
+    if is_video(column):
+        return VIDEO_CELL
+    return _clip(value, cap)
+
+
 def _row_html(columns: list[dict], row: dict, number: int, cap: int | None) -> str:
     cells = [_cell(str(number), align=ALIGN_RIGHT)]
     for column in columns:
-        value = _value(row, column)
-        cells.append(_cell(_clip(value, cap) if value else EMPTY_CELL))
+        cells.append(_cell(_display(row, column, cap)))
     return f"<tr>{''.join(cells)}</tr>"
 
 
@@ -161,6 +173,8 @@ def build_company_html(columns: list[dict], row: dict, number: int) -> list[str]
     """Render one company with every value in full, split across messages if long."""
     from clients_db import row_label
 
+    from clients_db import is_video
+
     head = f"<h3>{escape(row_label(row, columns, limit=64))}</h3>"
     blocks: list[str] = []
     for column in columns:
@@ -168,6 +182,8 @@ def build_company_html(columns: list[dict], row: dict, number: int) -> list[str]
         value = _value(row, column)
         if not value:
             blocks.append(f"<p><b>{name}</b>: {EMPTY_CELL}</p>")
+        elif is_video(column):
+            blocks.append(f"<p><b>{name}</b>: {VIDEO_CELL} — кнопка «▶️ Видео» ниже</p>")
         elif len(value) <= INLINE_VALUE_LEN and "\n" not in value:
             blocks.append(f"<p><b>{name}</b>: {escape(value)}</p>")
         else:

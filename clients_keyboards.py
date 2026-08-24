@@ -92,14 +92,36 @@ def move_company_keyboard(company_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def input_keyboard(skip: bool = True, finish: bool = False) -> InlineKeyboardMarkup:
+def input_keyboard(
+    skip: bool = True,
+    finish: bool = False,
+    quick_values: list[str] | None = None,
+) -> InlineKeyboardMarkup:
+    """Prompt keyboard. Quick values fill the cell without typing anything."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if quick_values:
+        rows.append([
+            _btn(f"⏳ {value}" if value == "жду" else value, f"cl:qv:{i}")
+            for i, value in enumerate(quick_values)
+        ])
     row = []
     if skip:
         row.append(_btn("⏭ Пропустить", "cl:skip"))
     if finish:
         row.append(_btn("✅ Хватит", "cl:done"))
-    rows = [row] if row else []
+    if row:
+        rows.append(row)
     rows.append([_btn("✖️ Отмена", "cl:cancel")])
+    return _kb(rows)
+
+
+def card_keyboard(videos: list[tuple[int, int, str]]) -> InlineKeyboardMarkup:
+    """Close button, plus one play button per video the company has."""
+    rows = [
+        [_btn(f"▶️ {name}", f"cl:vid:{company_id}:{column_id}")]
+        for company_id, column_id, name in videos
+    ]
+    rows.append([_btn("✖️ Закрыть", "cl:close")])
     return _kb(rows)
 
 

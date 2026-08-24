@@ -1,6 +1,14 @@
 from unittest import TestCase
 
-from clients_db import LEGACY_SEED_COLUMNS, SEED_COLUMNS, row_label
+from clients_db import (
+    DROPPED_COLUMNS,
+    KIND_TEXT,
+    KIND_VIDEO,
+    RENAMED_COLUMNS,
+    SEED_COLUMNS,
+    is_video,
+    row_label,
+)
 from clients_keyboards import (
     cell_columns_keyboard,
     columns_list_keyboard,
@@ -21,9 +29,11 @@ from keyboards import build_main_keyboard
 
 
 COLUMNS = [
-    {"id": 1, "name": "Компания", "sort_order": 0},
-    {"id": 2, "name": "Контакт", "sort_order": 1},
+    {"id": 1, "name": "Компания", "sort_order": 0, "kind": KIND_TEXT, "quick_values": []},
+    {"id": 2, "name": "Контакт", "sort_order": 1, "kind": KIND_TEXT, "quick_values": []},
 ]
+VIDEO_COLUMN = {"id": 3, "name": "Видео сайта", "sort_order": 2,
+                "kind": KIND_VIDEO, "quick_values": []}
 
 
 def _rows(n: int) -> list[dict]:
@@ -38,27 +48,34 @@ def _all_callbacks(keyboard) -> list[str]:
 
 
 class SeedColumnTests(TestCase):
-    def test_seeded_columns_match_the_agreed_set(self) -> None:
+    def test_table_holds_exactly_the_agreed_columns(self) -> None:
         self.assertEqual(
-            SEED_COLUMNS,
-            [
-                "Компания",
-                "Персональное обращение",
-                "Ответ",
-                "Созвон",
-                "Причина",
-                "Вывод",
-                "Текст обращения",
-                "Текст ответа",
-            ],
+            [name for name, _, _ in SEED_COLUMNS],
+            ["Компания", "Текст сообщения", "Текст ответа", "Видео сайта", "Комментарий"],
         )
 
-    def test_company_stays_first_because_row_labels_depend_on_it(self) -> None:
-        self.assertEqual(SEED_COLUMNS[0], "Компания")
+    def test_only_the_site_video_column_is_a_video(self) -> None:
+        kinds = {name: kind for name, kind, _ in SEED_COLUMNS}
+        self.assertEqual(kinds["Видео сайта"], KIND_VIDEO)
+        self.assertTrue(all(k == KIND_TEXT for n, k in kinds.items() if n != "Видео сайта"))
 
-    def test_legacy_set_is_kept_distinct_for_the_upgrade_check(self) -> None:
-        self.assertNotEqual(SEED_COLUMNS, LEGACY_SEED_COLUMNS)
-        self.assertEqual(len(set(SEED_COLUMNS)), len(SEED_COLUMNS))
+    def test_reply_column_offers_a_waiting_shortcut(self) -> None:
+        quick = {name: values for name, _, values in SEED_COLUMNS}
+        self.assertEqual(quick["Текст ответа"], ["жду"])
+        self.assertEqual(quick["Компания"], [])
+
+    def test_company_stays_first_because_row_labels_depend_on_it(self) -> None:
+        self.assertEqual(SEED_COLUMNS[0][0], "Компания")
+
+    def test_dropped_columns_are_not_also_seeded(self) -> None:
+        seeded = {name for name, _, _ in SEED_COLUMNS}
+        self.assertEqual(seeded & set(DROPPED_COLUMNS), set())
+
+    def test_renames_point_at_a_column_that_exists(self) -> None:
+        seeded = {name for name, _, _ in SEED_COLUMNS}
+        for old, new in RENAMED_COLUMNS.items():
+            self.assertIn(new, seeded)
+            self.assertNotIn(old, seeded)
 
 
 class MainKeyboardTests(TestCase):
@@ -164,6 +181,49 @@ class PaginateTests(TestCase):
         rows = _rows(MAX_ROWS_PER_PAGE + 1)
         self.assertEqual(paginate_rows(COLUMNS, rows, 99)[1], 1)
         self.assertEqual(paginate_rows(COLUMNS, rows, -5)[1], 0)
+
+
+class VideoCellTests(TestCase):
+    def test_video_cell_shows_a_marker_not_the_file_id(self) -> None:
+        cols = COLUMNS + [VIDEO_COLUMN]
+        rows = [{"id": 1, "sort_order": 0, "values": {1: "Ромашка", 3: "BAACAgIAAxkBAAI"}}]
+        page, pg, pages, start = paginate_rows(cols, rows, 0)
+        html = build_table_html(cols, page, pg, pages, 1, start)
+        self.assertNotIn("BAACAgIAAxkBAAI", html)
+        self.assertIn("🎥", html)
+
+    def test_empty_video_cell_is_a_dash(self) -> None:
+        cols = COLUMNS + [VIDEO_COLUMN]
+        rows = [{"id": 1, "sort_order": 0, "values": {1: "Ромашка"}}]
+        page, pg, pages, start = paginate_rows(cols, rows, 0)
+        html = build_table_html(cols, page, pg, pages, 1, start)
+        self.assertNotIn("🎥", html)
+
+    def test_card_never_prints_the_file_id(self) -> None:
+        cols = COLUMNS + [VIDEO_COLUMN]
+        row = {"id": 1, "values": {1: "Ромашка", 3: "BAACAgIAAxkBAAI"}}
+        html = "".join(build_company_html(cols, row, 1))
+        self.assertNotIn("BAACAgIAAxkBAAI", html)
+        self.assertIn("Видео", html)
+
+    def test_row_label_skips_a_video_column(self) -> None:
+        cols = [VIDEO_COLUMN] + COLUMNS
+        row = {"id": 7, "values": {3: "BAACAgIAAxkBAAI", 1: "Ромашка"}}
+        self.assertEqual(row_label(row, cols), "Ромашка")
+
+    def test_is_video_reads_the_kind(self) -> None:
+        self.assertTrue(is_video(VIDEO_COLUMN))
+        self.assertFalse(is_video(COLUMNS[0]))
+
+
+class QuickValueKeyboardTests(TestCase):
+    def test_quick_values_become_buttons(self) -> None:
+        kb = input_keyboard(skip=True, quick_values=["жду"])
+        self.assertIn("cl:qv:0", _all_callbacks(kb))
+        self.assertTrue(any("жду" in b.text for row in kb.inline_keyboard for b in row))
+
+    def test_no_quick_values_means_no_extra_row(self) -> None:
+        self.assertEqual(_all_callbacks(input_keyboard(skip=True)), ["cl:skip", "cl:cancel"])
 
 
 class NoTruncationTests(TestCase):

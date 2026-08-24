@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, InputRichMessage, Message
 
 import clients_db as cdb
 from clients_keyboards import (
+    card_keyboard,
     cell_columns_keyboard,
     columns_keyboard,
     close_keyboard,
@@ -129,6 +130,39 @@ async def btn_clients(message: Message, state: FSMContext) -> None:
     await send_table(message.bot, message.chat.id, state, page=0)
 
 
+def _prompt_for(column: dict, prefix: str = "") -> tuple[str, list[str]]:
+    """Prompt text and quick values for one column."""
+    if cdb.is_video(column):
+        return f"{prefix}Пришли видео для «{column['name']}»", []
+    return f"{prefix}Введи значение для «{column['name']}»", column.get("quick_values") or []
+
+
+def _file_id(message: Message) -> str | None:
+    """Telegram file id of whatever video-ish attachment the message carries.
+
+    Storing the file id means the video lives on Telegram's servers -- nothing to
+    host, no size budget of our own, and sending it back is instant.
+    """
+    if message.video:
+        return message.video.file_id
+    if message.animation:
+        return message.animation.file_id
+    if message.video_note:
+        return message.video_note.file_id
+    if message.document and (message.document.mime_type or "").startswith("video/"):
+        return message.document.file_id
+    return None
+
+
+async def _send_video(bot: Bot, chat_id: int, file_id: str, caption: str) -> bool:
+    try:
+        await bot.send_video(chat_id=chat_id, video=file_id, caption=caption)
+        return True
+    except TelegramBadRequest as e:
+        logger.warning("Video send failed: %s", e)
+        return False
+
+
 # --- add company flow --------------------------------------------------------
 
 async def _ask_next_company_field(bot: Bot, chat_id: int, state: FSMContext) -> None:
@@ -142,11 +176,8 @@ async def _ask_next_company_field(bot: Bot, chat_id: int, state: FSMContext) -> 
         await bot.send_message(chat_id, "✅ Компания добавлена.")
         return
     col = columns[idx]
-    await _prompt(
-        bot, state, chat_id,
-        f"Введи значение для «{col['name']}»  ({idx + 1}/{len(columns)})",
-        input_keyboard(skip=True),
-    )
+    text, quick = _prompt_for(col, prefix=f"({idx + 1}/{len(columns)})  ")
+    await _prompt(bot, state, chat_id, text, input_keyboard(skip=True, quick_values=quick))
 
 
 async def _store_company_field(bot: Bot, chat_id: int, state: FSMContext, value: str) -> None:
@@ -260,6 +291,47 @@ async def cb_clients(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         return
 
+    if action == "qv":
+        index = int(parts[2])
+        current = await state.get_state()
+        data = await state.get_data()
+        if current == ClientsSG.add_company.state:
+            column = data["columns"][data["idx"]]
+        elif current == ClientsSG.edit_cell.state:
+            column = next(
+                (c for c in await cdb.get_columns() if c["id"] == data["column_id"]), None
+            )
+        else:
+            await callback.answer()
+            return
+        quick = (column or {}).get("quick_values") or []
+        if index >= len(quick):
+            await callback.answer("Уже не актуально", show_alert=True)
+            return
+        value = quick[index]
+        if current == ClientsSG.add_company.state:
+            await _store_company_field(bot, chat_id, state, value)
+        else:
+            await cdb.set_value(data["company_id"], data["column_id"], value)
+            await _finish(bot, state)
+        await callback.answer(value)
+        return
+
+    if action == "vid":
+        company_id, column_id = int(parts[2]), int(parts[3])
+        columns, rows = await cdb.get_table()
+        row = next((r for r in rows if r["id"] == company_id), None)
+        column = next((c for c in columns if c["id"] == column_id), None)
+        file_id = (row["values"].get(column_id) or "").strip() if row else ""
+        if not file_id or column is None:
+            await callback.answer("Видео нет", show_alert=True)
+            return
+        ok = await _send_video(
+            bot, chat_id, file_id, f"{column['name']} — {cdb.row_label(row, columns)}"
+        )
+        await callback.answer("" if ok else "Видео не открылось", show_alert=not ok)
+        return
+
     if action == "done":
         await _finish(bot, state)
         await callback.answer("Готово")
@@ -278,12 +350,17 @@ async def cb_clients(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.answer("Не найдено", show_alert=True)
             return
         number = next(i for i, r in enumerate(rows) if r["id"] == company_id) + 1
+        videos = [
+            (company_id, c["id"], c["name"])
+            for c in columns
+            if cdb.is_video(c) and (row["values"].get(c["id"]) or "").strip()
+        ]
         chunks = build_company_html(columns, row, number)
         for i, chunk in enumerate(chunks):
             await bot.send_rich_message(
                 chat_id=chat_id,
                 rich_message=InputRichMessage(html=chunk, skip_entity_detection=True),
-                reply_markup=close_keyboard() if i == len(chunks) - 1 else None,
+                reply_markup=card_keyboard(videos) if i == len(chunks) - 1 else None,
             )
         await callback.answer()
         return
@@ -317,14 +394,16 @@ async def cb_clients(callback: CallbackQuery, state: FSMContext) -> None:
         if column is None or row is None:
             await callback.answer("Не найдено", show_alert=True)
             return
-        current = row["values"].get(column_id, "") or "—"
+        raw = row["values"].get(column_id, "")
+        current = "🎥 есть" if (raw and cdb.is_video(column)) else (raw or "—")
         await state.set_state(ClientsSG.edit_cell)
         await state.update_data(company_id=company_id, column_id=column_id)
+        text, quick = _prompt_for(column)
         await _prompt(
             bot, state, chat_id,
             f"«{column['name']}» для «{cdb.row_label(row, columns)}»\n"
-            f"Сейчас: {current}\n\nВведи новое значение:",
-            input_keyboard(skip=False),
+            f"Сейчас: {current}\n\n{text}:",
+            input_keyboard(skip=False, quick_values=quick),
         )
         await callback.answer()
         return
@@ -449,10 +528,38 @@ async def _consume(message: Message) -> str:
     return text
 
 
+@clients_router.message(ClientsSG.add_company, F.video | F.animation | F.video_note | F.document)
+async def input_add_company_video(message: Message, state: FSMContext) -> None:
+    file_id = _file_id(message)
+    if file_id is None:
+        await message.answer("Это не видео. Пришли видеофайл или пропусти шаг.")
+        return
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
+    await _store_company_field(message.bot, message.chat.id, state, file_id)
+
+
 @clients_router.message(ClientsSG.add_company, ~F.text.in_(MENU_LABELS))
 async def input_add_company(message: Message, state: FSMContext) -> None:
     value = await _consume(message)
     await _store_company_field(message.bot, message.chat.id, state, value)
+
+
+@clients_router.message(ClientsSG.edit_cell, F.video | F.animation | F.video_note | F.document)
+async def input_edit_cell_video(message: Message, state: FSMContext) -> None:
+    file_id = _file_id(message)
+    if file_id is None:
+        await message.answer("Это не видео. Пришли видеофайл.")
+        return
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
+    data = await state.get_data()
+    await cdb.set_value(data["company_id"], data["column_id"], file_id)
+    await _finish(message.bot, state)
 
 
 @clients_router.message(ClientsSG.edit_cell, ~F.text.in_(MENU_LABELS))

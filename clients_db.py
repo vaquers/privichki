@@ -1,24 +1,37 @@
 from __future__ import annotations
 
+import json
+
 from db import get_pool
 
-# Default columns created on first run. Order matters: the first column is used
-# as the row label in selection menus.
-SEED_COLUMNS = [
-    "Компания",
+KIND_TEXT = "text"
+KIND_VIDEO = "video"
+
+# The table as it should look: (name, kind, quick values offered as buttons).
+# Order matters -- the first column is used as the row label in menus.
+SEED_COLUMNS: list[tuple[str, str, list[str]]] = [
+    ("Компания", KIND_TEXT, []),
+    ("Текст сообщения", KIND_TEXT, []),
+    ("Текст ответа", KIND_TEXT, ["жду"]),
+    ("Видео сайта", KIND_VIDEO, []),
+    ("Комментарий", KIND_TEXT, []),
+]
+
+# Columns from earlier versions that carry the same data under a new name.
+RENAMED_COLUMNS = {"Текст обращения": "Текст сообщения"}
+
+# Columns from earlier versions that are no longer wanted. Their values are
+# copied into client_values_archive before the column goes, because dropping a
+# column takes its data with it and that cannot be undone.
+DROPPED_COLUMNS = [
     "Персональное обращение",
     "Ответ",
     "Созвон",
     "Причина",
     "Вывод",
-    "Текст обращения",
-    "Текст ответа",
+    "Контакт",
+    "Статус",
 ]
-
-# Columns seeded by earlier versions. A database still holding exactly these and
-# no companies is re-seeded with SEED_COLUMNS; anything else is left untouched so
-# that hand-made columns and real data are never dropped on startup.
-LEGACY_SEED_COLUMNS = ["Компания", "Контакт", "Статус", "Комментарий"]
 
 
 async def init_clients_db() -> None:
@@ -45,38 +58,110 @@ async def init_clients_db() -> None:
                 PRIMARY KEY (company_id, column_id)
             )
         """)
-        await _seed_columns(conn)
-
-
-async def _seed_columns(conn) -> None:
-    """Install SEED_COLUMNS on a fresh table, or upgrade an untouched legacy one."""
-    rows = await conn.fetch("SELECT name FROM client_columns ORDER BY sort_order, id")
-    existing = [r["name"] for r in rows]
-
-    if existing == SEED_COLUMNS:
-        return
-    if existing:
-        if existing != LEGACY_SEED_COLUMNS:
-            return  # customised by hand -- not ours to rewrite
-        if await conn.fetchval("SELECT COUNT(*) FROM client_companies"):
-            return  # real data present -- keep the columns it was entered under
-        await conn.execute("DELETE FROM client_columns")
-
-    for i, name in enumerate(SEED_COLUMNS):
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_values_archive (
+                id SERIAL PRIMARY KEY,
+                company_id INTEGER,
+                column_name TEXT NOT NULL,
+                value TEXT NOT NULL,
+                archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
         await conn.execute(
-            "INSERT INTO client_columns (name, sort_order) VALUES ($1, $2)", name, i
+            f"ALTER TABLE client_columns ADD COLUMN IF NOT EXISTS kind TEXT "
+            f"NOT NULL DEFAULT '{KIND_TEXT}'"
+        )
+        await conn.execute(
+            "ALTER TABLE client_columns ADD COLUMN IF NOT EXISTS quick_values TEXT"
+        )
+        await _migrate_columns(conn)
+
+
+async def _migrate_columns(conn) -> None:
+    """Bring the column set in line with SEED_COLUMNS, keeping the data that stays."""
+    existing = {
+        r["name"]: r["id"]
+        for r in await conn.fetch("SELECT id, name FROM client_columns")
+    }
+
+    # 1. renames first, so the data lands under the new name instead of being
+    #    archived with the old column and recreated empty
+    for old, new in RENAMED_COLUMNS.items():
+        if old in existing and new not in existing:
+            await conn.execute(
+                "UPDATE client_columns SET name = $2 WHERE id = $1", existing[old], new
+            )
+            existing[new] = existing.pop(old)
+
+    # 2. archive and drop what is no longer wanted
+    for name in DROPPED_COLUMNS:
+        column_id = existing.get(name)
+        if column_id is None:
+            continue
+        await conn.execute(
+            "INSERT INTO client_values_archive (company_id, column_name, value) "
+            "SELECT company_id, $2, value FROM client_values "
+            "WHERE column_id = $1 AND value <> ''",
+            column_id, name,
+        )
+        await conn.execute("DELETE FROM client_columns WHERE id = $1", column_id)
+        existing.pop(name)
+
+    # 3. create anything missing and set kind/quick values on the known columns
+    for order, (name, kind, quick) in enumerate(SEED_COLUMNS):
+        quick_json = json.dumps(quick, ensure_ascii=False) if quick else None
+        if name in existing:
+            await conn.execute(
+                "UPDATE client_columns SET kind = $2, quick_values = $3, sort_order = $4 "
+                "WHERE id = $1",
+                existing[name], kind, quick_json, order,
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO client_columns (name, sort_order, kind, quick_values) "
+                "VALUES ($1, $2, $3, $4)",
+                name, order, kind, quick_json,
+            )
+
+    # 4. push any hand-made columns after the seeded ones, keeping their order
+    extras = await conn.fetch(
+        "SELECT id FROM client_columns WHERE name <> ALL($1::text[]) "
+        "ORDER BY sort_order, id",
+        [name for name, _, _ in SEED_COLUMNS],
+    )
+    for i, row in enumerate(extras):
+        await conn.execute(
+            "UPDATE client_columns SET sort_order = $2 WHERE id = $1",
+            row["id"], len(SEED_COLUMNS) + i,
         )
 
 
-# --- read ---
+# --- read -------------------------------------------------------------------
+
+def _parse_quick(raw) -> list[str]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return [str(v) for v in value] if isinstance(value, list) else []
+
+
+def is_video(column: dict) -> bool:
+    return column.get("kind") == KIND_VIDEO
+
 
 async def get_columns() -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, name, sort_order FROM client_columns ORDER BY sort_order, id"
+            "SELECT id, name, sort_order, kind, quick_values FROM client_columns "
+            "ORDER BY sort_order, id"
         )
-        return [dict(r) for r in rows]
+        return [
+            {**dict(r), "quick_values": _parse_quick(r["quick_values"])} for r in rows
+        ]
 
 
 async def get_rows() -> list[dict]:
@@ -103,15 +188,17 @@ async def get_table() -> tuple[list[dict], list[dict]]:
 
 
 def row_label(row: dict, columns: list[dict], limit: int = 28) -> str:
-    """Human label for a company row — value of the first column, or a fallback."""
+    """Human label for a company row -- value of the first text column."""
     for col in columns:
+        if is_video(col):
+            continue
         text = (row["values"].get(col["id"]) or "").strip()
         if text:
             return text if len(text) <= limit else text[: limit - 1] + "…"
     return f"Компания #{row['id']}"
 
 
-# --- companies ---
+# --- companies --------------------------------------------------------------
 
 async def add_company(values: dict[int, str]) -> int:
     pool = await get_pool()
@@ -149,17 +236,18 @@ async def set_value(company_id: int, column_id: int, value: str) -> None:
         )
 
 
-# --- columns ---
+# --- columns ----------------------------------------------------------------
 
-async def add_column(name: str) -> int:
+async def add_column(name: str, kind: str = KIND_TEXT) -> int:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM client_columns"
         )
         return await conn.fetchval(
-            "INSERT INTO client_columns (name, sort_order) VALUES ($1, $2) RETURNING id",
-            name, row["n"],
+            "INSERT INTO client_columns (name, sort_order, kind) VALUES ($1, $2, $3) "
+            "RETURNING id",
+            name, row["n"], kind,
         )
 
 
@@ -172,10 +260,18 @@ async def rename_column(column_id: int, name: str) -> None:
 async def delete_column(column_id: int) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
+        name = await conn.fetchval("SELECT name FROM client_columns WHERE id = $1", column_id)
+        if name is not None:
+            await conn.execute(
+                "INSERT INTO client_values_archive (company_id, column_name, value) "
+                "SELECT company_id, $2, value FROM client_values "
+                "WHERE column_id = $1 AND value <> ''",
+                column_id, name,
+            )
         await conn.execute("DELETE FROM client_columns WHERE id = $1", column_id)
 
 
-# --- reordering ---
+# --- reordering -------------------------------------------------------------
 
 async def _move(table: str, item_id: int, delta: int) -> bool:
     """Swap sort_order with the neighbour in the given direction."""
