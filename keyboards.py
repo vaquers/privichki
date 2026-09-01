@@ -25,8 +25,10 @@ BUTTON_LABEL = {
 # half-finished flow traps every button press.
 MENU_LABELS = ["Сегодня", "Статистика", "Манул", "Экономика", "Календарь"]
 
-# Longest task label on a button before it gets an ellipsis.
-TASK_LABEL_LEN = 24
+# Longest task label on a button before it gets an ellipsis. Tasks get a row
+# each, so this is roughly what a full-width button fits on a phone; the
+# untruncated title is always on the card image.
+TASK_LABEL_LEN = 40
 
 
 def build_main_keyboard() -> ReplyKeyboardMarkup:
@@ -83,7 +85,7 @@ def build_habits_keyboard(
         )
         for t in tasks
     ]
-    rows += [task_buttons[i:i + 2] for i in range(0, len(task_buttons), 2)]
+    rows += [[b] for b in task_buttons]
 
     rows.append([InlineKeyboardButton(
         text="Вернуть день" if skipped else "Пропустить день",

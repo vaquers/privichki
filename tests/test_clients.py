@@ -165,17 +165,22 @@ class PaginateTests(TestCase):
         _, _, _, start = paginate_rows(COLUMNS, rows, 1)
         self.assertEqual(start, MAX_ROWS_PER_PAGE)
 
-    def test_long_rows_reduce_the_page_size_instead_of_being_cut(self) -> None:
+    def test_long_values_no_longer_blow_up_a_page(self) -> None:
+        # The summary reduces a long value to a tick, so page size is governed
+        # by the row cap rather than by how much someone typed.
         long_rows = [
             {"id": i, "sort_order": i, "values": {1: "О" * 3000, 2: "и" * 3000}}
             for i in range(6)
         ]
         page_rows, _, pages, _ = paginate_rows(COLUMNS, long_rows, 0)
-        self.assertLess(len(page_rows), MAX_ROWS_PER_PAGE)
-        self.assertGreater(pages, 1)
-        # every row still lands on exactly one page
-        seen = sum(len(paginate_rows(COLUMNS, long_rows, p)[0]) for p in range(pages))
-        self.assertEqual(seen, len(long_rows))
+        self.assertEqual(len(page_rows), 6)
+        self.assertEqual(pages, 1)
+
+    def test_every_company_lands_on_exactly_one_page(self) -> None:
+        rows = _rows(MAX_ROWS_PER_PAGE * 2 + 3)
+        pages = paginate_rows(COLUMNS, rows, 0)[2]
+        seen = sum(len(paginate_rows(COLUMNS, rows, p)[0]) for p in range(pages))
+        self.assertEqual(seen, len(rows))
 
     def test_out_of_range_pages_clamp(self) -> None:
         rows = _rows(MAX_ROWS_PER_PAGE + 1)
@@ -190,7 +195,7 @@ class VideoCellTests(TestCase):
         page, pg, pages, start = paginate_rows(cols, rows, 0)
         html = build_table_html(cols, page, pg, pages, 1, start)
         self.assertNotIn("BAACAgIAAxkBAAI", html)
-        self.assertIn("🎥", html)
+        self.assertIn("видео ✓", html)
 
     def test_empty_video_cell_is_a_dash(self) -> None:
         cols = COLUMNS + [VIDEO_COLUMN]
@@ -227,13 +232,16 @@ class QuickValueKeyboardTests(TestCase):
 
 
 class NoTruncationTests(TestCase):
-    def test_a_long_value_is_shown_in_full_in_the_table(self) -> None:
+    def test_the_list_stays_short_and_the_card_keeps_the_full_text(self) -> None:
         text = "Здравствуйте, пишу по поводу сотрудничества. " * 6
-        rows = [{"id": 1, "sort_order": 0, "values": {1: text, 2: "x"}}]
-        page_rows, page, pages, start = paginate_rows(COLUMNS, rows, 0)
-        html = build_table_html(COLUMNS, page_rows, page, pages, 1, start)
-        self.assertIn(text.strip(), html)
-        self.assertNotIn("…", html)
+        row = {"id": 1, "sort_order": 0, "values": {1: "Ромашка", 2: text}}
+        page_rows, page, pages, start = paginate_rows(COLUMNS, [row], 0)
+        listing = build_table_html(COLUMNS, page_rows, page, pages, 1, start)
+        self.assertNotIn(text.strip(), listing)
+        self.assertIn("контакт ✓", listing)
+
+        card = "".join(build_company_html(COLUMNS, row, 1))
+        self.assertIn(text.strip(), card)
 
     def test_a_single_oversized_row_is_clipped_but_still_renders(self) -> None:
         rows = [{"id": 1, "sort_order": 0, "values": {1: "О" * 40000, 2: "и" * 40000}}]
@@ -300,25 +308,38 @@ class RowLabelTests(TestCase):
 
 
 class TableHtmlTests(TestCase):
-    def test_renders_a_native_table_with_header_cells(self) -> None:
+    def test_renders_one_numbered_block_per_company(self) -> None:
         html = build_table_html(COLUMNS, _rows(2))
-        self.assertIn("<table bordered striped>", html)
-        self.assertIn("<th>Компания</th>", html)
-        self.assertIn('<th align="right">#</th>', html)
-        self.assertIn("<td>Компания 0</td>", html)
-        self.assertEqual(html.count("<tr>"), 3)          # header + 2 rows
         self.assertTrue(html.startswith("<h3>Клиенты</h3>"))
+        self.assertIn("<b>1. Компания 0</b>", html)
+        self.assertIn("<b>2. Компания 1</b>", html)
+        # a squeezed table is exactly what this layout replaced
+        self.assertNotIn("<table", html)
 
-    def test_row_numbers_continue_across_pages(self) -> None:
+    def test_numbering_continues_across_pages(self) -> None:
         rows = _rows(MAX_ROWS_PER_PAGE + 2)
         page_rows, page, pages, start = paginate_rows(COLUMNS, rows, 1)
         html = build_table_html(COLUMNS, page_rows, page, pages, len(rows), start)
-        self.assertIn(f'<td align="right">{MAX_ROWS_PER_PAGE + 1}</td>', html)
+        self.assertIn(f"<b>{MAX_ROWS_PER_PAGE + 1}. ", html)
         self.assertIn(f"стр. 2/{pages}", html)
 
-    def test_blank_values_render_as_a_dash(self) -> None:
+    def test_a_company_with_nothing_filled_in_says_so(self) -> None:
         html = build_table_html(COLUMNS, [{"id": 1, "values": {1: "Ромашка", 2: "   "}}])
-        self.assertIn("<td>—</td>", html)
+        self.assertIn("<b>1. Ромашка</b>", html)
+        self.assertIn("пусто", html)
+
+    def test_summary_names_only_the_filled_fields(self) -> None:
+        html = build_table_html(
+            COLUMNS, [{"id": 1, "values": {1: "Ромашка", 2: "Иван"}}]
+        )
+        self.assertIn("контакт: Иван", html)
+
+    def test_a_long_value_is_reduced_to_a_tick_in_the_summary(self) -> None:
+        html = build_table_html(
+            COLUMNS, [{"id": 1, "values": {1: "Ромашка", 2: "и" * 200}}]
+        )
+        self.assertIn("контакт ✓", html)
+        self.assertNotIn("и" * 200, html)
 
     def test_user_input_is_html_escaped(self) -> None:
         rows = [{"id": 1, "values": {1: '<script>alert("x")</script>', 2: "a & b"}}]
@@ -328,9 +349,12 @@ class TableHtmlTests(TestCase):
         self.assertIn("a &amp; b", html)
 
     def test_column_names_are_escaped_too(self) -> None:
-        cols = [{"id": 1, "name": "<b>Компания</b>", "sort_order": 0}]
-        html = build_table_html(cols, [{"id": 1, "values": {1: "x"}}])
-        self.assertNotIn("<b>", html)
+        cols = [
+            {"id": 1, "name": "Компания", "sort_order": 0},
+            {"id": 2, "name": "<b>Контакт</b>", "sort_order": 1},
+        ]
+        html = build_table_html(cols, [{"id": 1, "values": {1: "x", 2: "Иван"}}])
+        self.assertNotIn("<b>Контакт</b>", html)
         self.assertIn("&lt;b&gt;", html)
 
     def test_caption_counts_all_rows_not_just_the_page(self) -> None:
@@ -339,15 +363,14 @@ class TableHtmlTests(TestCase):
         html = build_table_html(COLUMNS, page_rows, page, pages, len(rows), start)
         self.assertIn("25 компаний", html)
 
-    def test_whitespace_inside_cells_is_collapsed(self) -> None:
+    def test_whitespace_is_collapsed(self) -> None:
         rows = [{"id": 1, "values": {1: "Ромашка\n\nООО", 2: "a   b"}}]
         html = build_table_html(COLUMNS, rows)
         self.assertIn("Ромашка ООО", html)
         self.assertIn("a b", html)
 
-    def test_empty_table_still_shows_the_header_and_a_hint(self) -> None:
+    def test_an_empty_list_invites_the_first_company(self) -> None:
         html = build_table_html(COLUMNS, [])
-        self.assertIn("<th>Компания</th>", html)
         self.assertIn("Пока нет компаний", html)
 
     def test_no_columns_yields_a_hint_instead_of_a_table(self) -> None:

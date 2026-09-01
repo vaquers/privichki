@@ -192,7 +192,7 @@ def row_label(row: dict, columns: list[dict], limit: int = 28) -> str:
     for col in columns:
         if is_video(col):
             continue
-        text = (row["values"].get(col["id"]) or "").strip()
+        text = " ".join((row["values"].get(col["id"]) or "").split())
         if text:
             return text if len(text) <= limit else text[: limit - 1] + "…"
     return f"Компания #{row['id']}"

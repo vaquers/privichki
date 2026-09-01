@@ -22,6 +22,21 @@ ALIGN_RIGHT = "right"
 EMPTY_CELL = "—"
 VIDEO_CELL = "🎥 есть"
 
+# Telegram squeezes a wide table into the screen instead of scrolling it, so on
+# a phone five columns collapse to a letter per line. The list shows one company
+# per block with a compact summary line; the full values live in the card behind
+# «Открыть компанию».
+SHORT_LABEL = {
+    "Текст сообщения": "сообщение",
+    "Текст ответа": "ответ",
+    "Видео сайта": "видео",
+    "Комментарий": "коммент",
+}
+
+# A value up to this length is quoted verbatim in the summary; longer ones are
+# reduced to a tick, since the point of the line is scanning, not reading.
+INLINE_SUMMARY_LEN = 18
+
 
 def _plural(n: int, one: str, few: str, many: str) -> str:
     """Russian plural form for a count."""
@@ -87,13 +102,13 @@ def paginate_rows(
     if not rows:
         return [], 0, 1, 0
 
-    overhead = len(_header_html(columns)) + 200  # header, caption and title
+    overhead = 200  # title and caption
     pages: list[list[dict]] = []
     current: list[dict] = []
     current_len = overhead
 
     for i, row in enumerate(rows):
-        size = len(_row_html(columns, row, i + 1, None))
+        size = len(_company_block(columns, row, i + 1))
         too_long = current_len + size > SAFE_HTML_LEN
         too_many = len(current) >= MAX_ROWS_PER_PAGE
         if current and (too_long or too_many):
@@ -119,48 +134,64 @@ def _subtitle(row_count: int, column_count: int, page: int, pages: int) -> str:
     return " · ".join(parts)
 
 
+def _short_label(column: dict) -> str:
+    return SHORT_LABEL.get(column["name"], column["name"].lower())
+
+
+def _summary(columns: list[dict], row: dict) -> str:
+    """One scannable line: only the fields that actually hold something."""
+    from clients_db import is_video
+
+    parts = []
+    for column in columns[1:]:
+        value = _value(row, column)
+        label = escape(_short_label(column))
+        if is_video(column):
+            if value:
+                parts.append(f"{label} ✓")
+            continue
+        if not value:
+            continue
+        flat = " ".join(value.split())
+        if len(flat) <= INLINE_SUMMARY_LEN:
+            parts.append(f"{label}: {escape(flat)}")
+        else:
+            parts.append(f"{label} ✓")
+    return " · ".join(parts)
+
+
+def _company_block(columns: list[dict], row: dict, number: int) -> str:
+    from clients_db import row_label
+
+    title = escape(row_label(row, columns, limit=40))
+    block = f"<p><b>{number}. {title}</b></p>"
+    summary = _summary(columns, row)
+    return block + (f"<p>{summary}</p>" if summary else "<p>пусто</p>")
+
+
 def _build(
     columns: list[dict], rows: list[dict], page: int, pages: int,
-    total_rows: int, start: int, cap: int | None,
+    total_rows: int, start: int, cap: int | None = None,
 ) -> str:
-    body = "".join(
-        _row_html(columns, row, start + n + 1, cap) for n, row in enumerate(rows)
-    )
     caption = escape(_subtitle(total_rows, len(columns), page, pages))
-    html = (
-        "<h3>Клиенты</h3>"
-        "<table bordered striped>"
-        f"<caption>{caption}</caption>"
-        f"{_header_html(columns)}{body}"
-        "</table>"
-    )
+    html = f"<h3>Клиенты</h3><p>{caption}</p>"
     if not rows:
-        html += "<p>Пока нет компаний. Нажми «➕ Компания».</p>"
-    return html
+        return html + "<p>Пока нет компаний. Нажми «➕ Компания».</p>"
+    return html + "".join(
+        _company_block(columns, row, start + n + 1) for n, row in enumerate(rows)
+    )
 
 
 def build_table_html(
     columns: list[dict], rows: list[dict], page: int = 0, pages: int = 1,
     total_rows: int | None = None, start: int = 0,
 ) -> str:
-    """Render one page of the client table as Telegram rich-message HTML."""
+    """Render one page of companies as Telegram rich-message HTML."""
     if total_rows is None:
         total_rows = len(rows)
-
     if not columns:
         return "<h3>Клиенты</h3><p>Нет колонок. Добавь колонку в «Редактировать → Колонки».</p>"
-
-    html = _build(columns, rows, page, pages, total_rows, start, None)
-    if len(html) <= SAFE_HTML_LEN:
-        return html
-
-    # A single row bigger than a whole page: clip it so the table still renders.
-    # The full text stays readable through the company card.
-    for cap in CELL_CAPS:
-        html = _build(columns, rows, page, pages, total_rows, start, cap)
-        if len(html) <= SAFE_HTML_LEN:
-            return html
-    return html
+    return _build(columns, rows, page, pages, total_rows, start)
 
 
 def _paragraphs(value: str) -> str:

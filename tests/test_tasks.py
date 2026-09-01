@@ -118,10 +118,11 @@ class TaskKeyboardTests(TestCase):
         )
         rows = [[b.callback_data for b in row] for row in kb.inline_keyboard]
         self.assertTrue(rows[0][0].startswith("toggle:"))
-        self.assertTrue(rows[1][0].startswith("task:"))
-        self.assertEqual(len(rows[1]), 2)      # two per row
-        self.assertEqual(len(rows[2]), 1)
-        self.assertTrue(rows[3][0].startswith("skip:"))
+        task_rows = [r for r in rows if r[0].startswith("task:")]
+        self.assertEqual(len(task_rows), 3)
+        # one per row, so the title has the full button width
+        self.assertTrue(all(len(r) == 1 for r in task_rows))
+        self.assertTrue(rows[4][0].startswith("skip:"))
 
     def test_long_titles_are_shortened_on_the_button(self) -> None:
         kb = build_habits_keyboard(
