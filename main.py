@@ -20,6 +20,8 @@ from config import (
 )
 from db import (
     ensure_day_rows,
+    get_setting,
+    set_setting,
     get_day_habits,
     get_day_state,
     has_daily_message,
@@ -31,6 +33,7 @@ from tasks_db import init_tasks_db
 from econ_handlers import econ_router
 from handlers import router, send_day_card
 from middleware import AccessMiddleware
+from keyboards import build_main_keyboard, menu_fingerprint
 from render import HABIT_LABEL
 from stats import compute_week_summary
 
@@ -96,6 +99,21 @@ async def week_summary_job(bot: Bot) -> None:
     await bot.send_message(ALLOWED_USER_ID, "\n".join(lines))
 
 
+MENU_SETTING = "menu_fingerprint"
+
+
+async def refresh_menu(bot: Bot) -> None:
+    """Push the reply keyboard when its layout has changed since last time."""
+    current = menu_fingerprint()
+    if await get_setting(MENU_SETTING) == current:
+        return
+    await bot.send_message(
+        ALLOWED_USER_ID, "Меню обновлено.", reply_markup=build_main_keyboard()
+    )
+    await set_setting(MENU_SETTING, current)
+    logger.info("Menu keyboard re-sent, fingerprint %s", current)
+
+
 async def main() -> None:
     await init_db()
     await init_clients_db()
@@ -111,6 +129,8 @@ async def main() -> None:
     dp.include_router(router)
     dp.include_router(clients_router)
     dp.include_router(econ_router)
+
+    await refresh_menu(bot)
 
     scheduler = AsyncIOScheduler()
     for time_str, job in (

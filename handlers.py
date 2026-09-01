@@ -30,6 +30,7 @@ from calendar_view import month_grid, parse_month
 from stats import day_status, month_overview
 from keyboards import (
     MENU_LABELS,
+    menu_fingerprint,
     build_calendar_keyboard,
     build_habits_keyboard,
     build_main_keyboard,
@@ -87,6 +88,12 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         reply_markup=build_main_keyboard(),
     )
     await send_day_card(message.bot, message.chat.id, _today())
+
+
+@router.message(Command("menu"))
+async def cmd_menu(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Меню обновлено.", reply_markup=build_main_keyboard())
 
 
 @router.message(F.text == "Сегодня")

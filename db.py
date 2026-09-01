@@ -59,6 +59,12 @@ async def init_db() -> None:
             )
         """)
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS skipped_days (
                 date TEXT PRIMARY KEY,
                 reason TEXT NOT NULL DEFAULT ''
@@ -188,3 +194,21 @@ async def has_daily_message(date: str) -> bool:
             "SELECT COUNT(*) as cnt FROM daily_log WHERE date = $1", date
         )
         return row["cnt"] > 0
+
+
+# --- settings ---------------------------------------------------------------
+
+async def get_setting(key: str) -> str | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT value FROM bot_settings WHERE key = $1", key)
+
+
+async def set_setting(key: str, value: str) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO bot_settings (key, value) VALUES ($1, $2) "
+            "ON CONFLICT (key) DO UPDATE SET value = $2",
+            key, value,
+        )

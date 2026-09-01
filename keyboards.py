@@ -32,6 +32,18 @@ MENU_LABELS = ["Сегодня", "Статистика", "Манул", "Экон
 TASK_LABEL_LEN = 40
 
 
+def menu_fingerprint() -> str:
+    """Identifies the current menu layout.
+
+    Telegram caches the reply keyboard and only replaces it when the bot sends
+    one, so a new button stays invisible until then. The bot compares this
+    against the last one it sent and re-sends the keyboard when it changes.
+    """
+    import hashlib
+
+    return hashlib.sha1("|".join(MENU_LABELS).encode()).hexdigest()[:12]
+
+
 def build_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
