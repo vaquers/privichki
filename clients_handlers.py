@@ -6,7 +6,14 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InputRichMessage, Message
+from aiogram.types import (
+    CallbackQuery,
+    InputMediaVideo,
+    InputRichMessage,
+    InputRichMessageMedia,
+    Message,
+)
+import rich
 
 import clients_db as cdb
 from clients_keyboards import (
@@ -355,13 +362,36 @@ async def cb_clients(callback: CallbackQuery, state: FSMContext) -> None:
             for c in columns
             if cdb.is_video(c) and (row["values"].get(c["id"]) or "").strip()
         ]
+        media = [
+            InputRichMessageMedia(
+                id=rich.media_id_for("vid", column_id),
+                media=InputMediaVideo(media=row["values"][column_id]),
+            )
+            for _, column_id, _ in videos
+        ]
         chunks = build_company_html(columns, row, number)
         for i, chunk in enumerate(chunks):
-            await bot.send_rich_message(
-                chat_id=chat_id,
-                rich_message=InputRichMessage(html=chunk, skip_entity_detection=True),
-                reply_markup=card_keyboard(videos) if i == len(chunks) - 1 else None,
-            )
+            last = i == len(chunks) - 1
+            try:
+                await bot.send_rich_message(
+                    chat_id=chat_id,
+                    rich_message=InputRichMessage(
+                        html=chunk,
+                        media=media if media else None,
+                        skip_entity_detection=True,
+                    ),
+                    reply_markup=card_keyboard(videos) if last else None,
+                )
+            except TelegramBadRequest as e:
+                # An embedded video is a nicety; the card itself must still arrive.
+                logger.warning("Card with embedded media failed (%s), retrying plain", e)
+                await bot.send_rich_message(
+                    chat_id=chat_id,
+                    rich_message=InputRichMessage(
+                        html=chunk, skip_entity_detection=True),
+                    reply_markup=card_keyboard(videos) if last else None,
+                )
+            media = None    # only the chunk that carries the tag needs it
         await callback.answer()
         return
 

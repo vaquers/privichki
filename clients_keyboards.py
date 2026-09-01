@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import DisabledButton, InlineKeyboardButton, InlineKeyboardMarkup
 
 from clients_db import row_label
 
@@ -21,10 +21,15 @@ def table_keyboard(page: int = 0, pages: int = 1) -> InlineKeyboardMarkup:
         [_btn("🔍 Открыть компанию", "cl:show")],
     ]
     if pages > 1:
+        def _pager(text: str, target: int | None) -> InlineKeyboardButton:
+            if target is None:
+                return InlineKeyboardButton(text=text, disabled=DisabledButton())
+            return _btn(text, f"cl:p:{target}")
+
         rows.append([
-            _btn("◀️", f"cl:p:{page - 1}" if page > 0 else "cl:noop"),
-            _btn(f"{page + 1}/{pages}", "cl:noop"),
-            _btn("▶️", f"cl:p:{page + 1}" if page < pages - 1 else "cl:noop"),
+            _pager("◀️", page - 1 if page > 0 else None),
+            InlineKeyboardButton(text=f"{page + 1}/{pages}", disabled=DisabledButton()),
+            _pager("▶️", page + 1 if page < pages - 1 else None),
         ])
     return _kb(rows)
 

@@ -44,7 +44,8 @@ def _rows(n: int) -> list[dict]:
 
 
 def _all_callbacks(keyboard) -> list[str]:
-    return [b.callback_data for row in keyboard.inline_keyboard for b in row]
+    return [b.callback_data for row in keyboard.inline_keyboard for b in row
+            if b.callback_data is not None]
 
 
 class SeedColumnTests(TestCase):
@@ -93,18 +94,18 @@ class TableKeyboardTests(TestCase):
         self.assertEqual(_all_callbacks(kb), ["cl:add", "cl:edit", "cl:show"])
 
     def test_pager_appears_and_clamps_at_edges(self) -> None:
-        first = _all_callbacks(table_keyboard(page=0, pages=3))
-        self.assertIn("cl:noop", first)      # no page before the first
-        self.assertIn("cl:p:1", first)
+        first = table_keyboard(page=0, pages=3).inline_keyboard[-1]
+        self.assertIsNotNone(first[0].disabled)      # no page before the first
+        self.assertEqual(first[2].callback_data, "cl:p:1")
 
         middle = _all_callbacks(table_keyboard(page=1, pages=3))
         self.assertIn("cl:p:0", middle)
         self.assertIn("cl:p:2", middle)
 
-        last = table_keyboard(page=2, pages=3)
-        pager = last.inline_keyboard[-1]
-        self.assertEqual(pager[2].callback_data, "cl:noop")
-        self.assertEqual(pager[1].text, "3/3")
+        last = table_keyboard(page=2, pages=3).inline_keyboard[-1]
+        self.assertIsNotNone(last[2].disabled)       # nor after the last
+        self.assertEqual(last[1].text, "3/3")
+        self.assertIsNotNone(last[1].disabled)       # the counter is a label
 
 
 class SelectionKeyboardTests(TestCase):
@@ -172,9 +173,12 @@ class PaginateTests(TestCase):
             {"id": i, "sort_order": i, "values": {1: "О" * 3000, 2: "и" * 3000}}
             for i in range(6)
         ]
+        # the collapsed text counts towards the page, so fewer blocks fit
         page_rows, _, pages, _ = paginate_rows(COLUMNS, long_rows, 0)
-        self.assertEqual(len(page_rows), 6)
-        self.assertEqual(pages, 1)
+        self.assertLess(len(page_rows), 6)
+        self.assertGreater(pages, 1)
+        seen = sum(len(paginate_rows(COLUMNS, long_rows, p)[0]) for p in range(pages))
+        self.assertEqual(seen, len(long_rows))
 
     def test_every_company_lands_on_exactly_one_page(self) -> None:
         rows = _rows(MAX_ROWS_PER_PAGE * 2 + 3)
@@ -237,8 +241,8 @@ class NoTruncationTests(TestCase):
         row = {"id": 1, "sort_order": 0, "values": {1: "Ромашка", 2: text}}
         page_rows, page, pages, start = paginate_rows(COLUMNS, [row], 0)
         listing = build_table_html(COLUMNS, page_rows, page, pages, 1, start)
-        self.assertNotIn(text.strip(), listing)
         self.assertIn("контакт ✓", listing)
+        self.assertIn("<blockquote expandable>", listing)
 
         card = "".join(build_company_html(COLUMNS, row, 1))
         self.assertIn(text.strip(), card)
@@ -334,12 +338,13 @@ class TableHtmlTests(TestCase):
         )
         self.assertIn("контакт: Иван", html)
 
-    def test_a_long_value_is_reduced_to_a_tick_in_the_summary(self) -> None:
+    def test_a_long_value_is_a_tick_in_the_summary_and_a_collapsed_quote(self) -> None:
         html = build_table_html(
             COLUMNS, [{"id": 1, "values": {1: "Ромашка", 2: "и" * 200}}]
         )
-        self.assertIn("контакт ✓", html)
-        self.assertNotIn("и" * 200, html)
+        self.assertIn("контакт ✓", html)          # scannable summary
+        self.assertIn("<blockquote expandable>", html)
+        self.assertIn("и" * 200, html)            # full text, collapsed by default
 
     def test_user_input_is_html_escaped(self) -> None:
         rows = [{"id": 1, "values": {1: '<script>alert("x")</script>', 2: "a & b"}}]
@@ -350,8 +355,10 @@ class TableHtmlTests(TestCase):
 
     def test_column_names_are_escaped_too(self) -> None:
         cols = [
-            {"id": 1, "name": "Компания", "sort_order": 0},
-            {"id": 2, "name": "<b>Контакт</b>", "sort_order": 1},
+            {"id": 1, "name": "Компания", "sort_order": 0,
+             "kind": "text", "quick_values": []},
+            {"id": 2, "name": "<b>Контакт</b>", "sort_order": 1,
+             "kind": "text", "quick_values": []},
         ]
         html = build_table_html(cols, [{"id": 1, "values": {1: "x", 2: "Иван"}}])
         self.assertNotIn("<b>Контакт</b>", html)

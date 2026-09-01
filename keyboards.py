@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aiogram.enums import ButtonStyle
 from aiogram.types import (
+    DisabledButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -127,11 +128,11 @@ def build_calendar_keyboard(
     next_y, next_m = shift_month(year, month, 1)
     rows = [[
         InlineKeyboardButton(text="‹", callback_data=f"cal:m:{format_month(prev_y, prev_m)}"),
-        InlineKeyboardButton(text=month_title(year, month), callback_data="cal:noop"),
+        InlineKeyboardButton(text=month_title(year, month), disabled=DisabledButton()),
         InlineKeyboardButton(text="›", callback_data=f"cal:m:{format_month(next_y, next_m)}"),
     ]]
     rows.append([
-        InlineKeyboardButton(text=d, callback_data="cal:noop")
+        InlineKeyboardButton(text=d, disabled=DisabledButton())
         for d in ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
     ])
 
@@ -139,7 +140,7 @@ def build_calendar_keyboard(
         row = []
         for day in week:
             if day is None:
-                row.append(InlineKeyboardButton(text=" ", callback_data="cal:noop"))
+                row.append(InlineKeyboardButton(text=" ", disabled=DisabledButton()))
                 continue
             iso = day.isoformat()
             status = statuses.get(iso, "empty")

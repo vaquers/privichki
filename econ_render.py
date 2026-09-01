@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from html import escape
 
+import rich
+
 SAFE_HTML_LEN = 8000
 PREVIEW_LEN = 90
 
@@ -47,7 +49,14 @@ def build_list_html(notes: list[dict], marks: int, per_topic: int,
             line += f" · {when}"
         items.append(f"<p>{line}</p>")
         if n.get("body"):
-            items.append(f"<p>{escape(_preview(n['body']))}</p>")
+            # The whole write-up is here, collapsed: a tap opens it in place.
+            items.append(rich.expandable_quote(n["body"]))
+        items.append(rich.button_row([
+            rich.button("Открыть", f"ec:open:{n['id']}", style=rich.STYLE_PRIMARY),
+            rich.button("Название", f"ec:ret:{n['id']}"),
+            rich.button("Текст", f"ec:reb:{n['id']}"),
+            rich.button("Удалить", f"ec:del:{n['id']}", style=rich.STYLE_DANGER),
+        ]))
 
     html = head + "".join(items)
     while len(html) > SAFE_HTML_LEN and items:

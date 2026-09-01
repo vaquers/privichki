@@ -154,11 +154,13 @@ class CalendarKeyboardTests(TestCase):
     def test_weekday_header_is_inert(self) -> None:
         row = self._kb().inline_keyboard[1]
         self.assertEqual([b.text for b in row], ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"])
-        self.assertTrue(all(b.callback_data == "cal:noop" for b in row))
+        # genuinely disabled rather than wired to a do-nothing callback
+        self.assertTrue(all(b.disabled is not None for b in row))
+        self.assertTrue(all(b.callback_data is None for b in row))
 
     def test_every_day_of_the_month_is_clickable(self) -> None:
         days = [b.callback_data for b in _flat(self._kb())
-                if b.callback_data.startswith("cal:d:")]
+                if b.callback_data and b.callback_data.startswith("cal:d:")]
         self.assertEqual(len(days), 31)
         self.assertIn("cal:d:2026-08-01", days)
         self.assertIn("cal:d:2026-08-31", days)
@@ -167,13 +169,14 @@ class CalendarKeyboardTests(TestCase):
         first_week = self._kb().inline_keyboard[2]
         blanks = [b for b in first_week if b.text == " "]
         self.assertEqual(len(blanks), 5)
-        self.assertTrue(all(b.callback_data == "cal:noop" for b in blanks))
+        self.assertTrue(all(b.disabled is not None for b in blanks))
 
     def test_colour_carries_the_day_state(self) -> None:
         kb = self._kb({"2026-08-03": "perfect", "2026-08-05": "skipped"})
         by_day = {
             b.callback_data.rsplit(":", 1)[1]: b.style
-            for b in _flat(kb) if b.callback_data.startswith("cal:d:")
+            for b in _flat(kb)
+            if b.callback_data and b.callback_data.startswith("cal:d:")
         }
         self.assertEqual(by_day["2026-08-03"], ButtonStyle.SUCCESS)
         self.assertEqual(by_day["2026-08-05"], ButtonStyle.DANGER)
@@ -182,5 +185,6 @@ class CalendarKeyboardTests(TestCase):
 
     def test_a_marked_day_keeps_its_colour_even_when_it_is_today(self) -> None:
         kb = self._kb({"2026-08-25": "perfect"})
-        today_button = [b for b in _flat(kb) if b.callback_data == "cal:d:2026-08-25"][0]
+        today_button = [b for b in _flat(kb)
+                        if b.callback_data == "cal:d:2026-08-25"][0]
         self.assertEqual(today_button.style, ButtonStyle.SUCCESS)

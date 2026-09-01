@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from html import escape
 
+import rich
+
 # Telegram documents no length limit for rich_message HTML, so this is a
 # conservative safety net rather than a known ceiling.
 SAFE_HTML_LEN = 8000
@@ -36,6 +38,11 @@ SHORT_LABEL = {
 # A value up to this length is quoted verbatim in the summary; longer ones are
 # reduced to a tick, since the point of the line is scanning, not reading.
 INLINE_SUMMARY_LEN = 18
+
+# A collapsed quote still ships its whole text in the message, so a single very
+# long value would blow the size budget on its own. Past this, the quote is cut
+# and the rest is read in the card.
+MAX_QUOTE_LEN = 1500
 
 
 def _plural(n: int, one: str, few: str, many: str) -> str:
@@ -160,25 +167,65 @@ def _summary(columns: list[dict], row: dict) -> str:
     return " · ".join(parts)
 
 
-def _company_block(columns: list[dict], row: dict, number: int) -> str:
-    from clients_db import row_label
+def _company_block(columns: list[dict], row: dict, number: int,
+                   with_quotes: bool = True) -> str:
+    """Heading, the long fields as collapsed quotes, then this company's buttons.
 
-    title = escape(row_label(row, columns, limit=40))
-    block = f"<p><b>{number}. {title}</b></p>"
+    The full text sits in the message itself: a tap expands it in place, so
+    reading a message no longer means opening a separate card.
+    """
+    from clients_db import is_video, row_label
+
+    parts = [rich.paragraph(f"{number}. {rich.esc(row_label(row, columns, limit=40))}",
+                            bold=True)]
+
     summary = _summary(columns, row)
-    return block + (f"<p>{summary}</p>" if summary else "<p>пусто</p>")
+    if summary:
+        parts.append(f"<p>{summary}</p>")
+
+    quoted = False
+    if with_quotes:
+        for column in columns[1:]:
+            if is_video(column):
+                continue
+            value = _value(row, column)
+            if len(" ".join(value.split())) > INLINE_SUMMARY_LEN:
+                parts.append(rich.paragraph(rich.esc(_short_label(column)), bold=True))
+                parts.append(rich.expandable_quote(_clip(value, MAX_QUOTE_LEN)))
+                quoted = True
+
+    if not summary and not quoted:
+        parts.append("<p>пусто</p>")
+
+    company_id = row["id"]
+    buttons = [rich.button("Открыть", f"cl:show:{company_id}", style=rich.STYLE_PRIMARY)]
+    reply_column = next(
+        (c for c in columns if c.get("quick_values") and not is_video(c)), None
+    )
+    if reply_column is not None:
+        buttons.append(rich.button(
+            "Ответ", f"cl:cellv:{company_id}:{reply_column['id']}",
+            style=rich.STYLE_SUCCESS,
+        ))
+    video_column = next((c for c in columns if is_video(c)), None)
+    if video_column is not None and _value(row, video_column):
+        buttons.append(rich.button("Видео", f"cl:vid:{company_id}"))
+    parts.append(rich.button_row(buttons))
+
+    return "".join(parts)
 
 
 def _build(
     columns: list[dict], rows: list[dict], page: int, pages: int,
-    total_rows: int, start: int, cap: int | None = None,
+    total_rows: int, start: int, with_quotes: bool = True,
 ) -> str:
     caption = escape(_subtitle(total_rows, len(columns), page, pages))
     html = f"<h3>Клиенты</h3><p>{caption}</p>"
     if not rows:
         return html + "<p>Пока нет компаний. Нажми «➕ Компания».</p>"
     return html + "".join(
-        _company_block(columns, row, start + n + 1) for n, row in enumerate(rows)
+        _company_block(columns, row, start + n + 1, with_quotes)
+        for n, row in enumerate(rows)
     )
 
 
@@ -191,7 +238,13 @@ def build_table_html(
         total_rows = len(rows)
     if not columns:
         return "<h3>Клиенты</h3><p>Нет колонок. Добавь колонку в «Редактировать → Колонки».</p>"
-    return _build(columns, rows, page, pages, total_rows, start)
+
+    html = _build(columns, rows, page, pages, total_rows, start)
+    if len(html) <= SAFE_HTML_LEN:
+        return html
+    # Too much text to inline even after clipping: fall back to summaries only,
+    # which always fit. The full values stay reachable through «Открыть».
+    return _build(columns, rows, page, pages, total_rows, start, with_quotes=False)
 
 
 def _paragraphs(value: str) -> str:
@@ -214,7 +267,10 @@ def build_company_html(columns: list[dict], row: dict, number: int) -> list[str]
         if not value:
             blocks.append(f"<p><b>{name}</b>: {EMPTY_CELL}</p>")
         elif is_video(column):
-            blocks.append(f"<p><b>{name}</b>: {VIDEO_CELL} — кнопка «▶️ Видео» ниже</p>")
+            # Embedded by reference: the file itself travels in the message's
+            # media list, so the video plays inside the card.
+            blocks.append(f"<p><b>{name}</b></p>")
+            blocks.append(rich.video(rich.media_id_for("vid", column["id"])))
         elif len(value) <= INLINE_VALUE_LEN and "\n" not in value:
             blocks.append(f"<p><b>{name}</b>: {escape(value)}</p>")
         else:
