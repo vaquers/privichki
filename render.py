@@ -63,8 +63,12 @@ WEEKDAYS_RU = [
 ]
 
 
-def render_day_card(date_str: str, habits: list[dict], state: dict[str, bool]) -> BytesIO:
-    """Card for one day, showing only the habits scheduled on it."""
+TASK_DONE_COLOR = (0x34, 0xC7, 0x59)
+
+
+def render_day_card(date_str: str, habits: list[dict], state: dict[str, bool],
+                    tasks: list[dict] | None = None) -> BytesIO:
+    """Card for one day: the habits scheduled on it, plus that day's own tasks."""
     from datetime import date as date_cls
 
     d = date_cls.fromisoformat(date_str)
@@ -74,6 +78,11 @@ def render_day_card(date_str: str, habits: list[dict], state: dict[str, bool]) -
     total = len(day_habits)
     done_count = sum(1 for h in day_habits if state.get(h["key"], False))
     counter = f"{done_count}/{total} выполнено"
+
+    tasks = tasks or []
+    tasks_done = sum(1 for t in tasks if t["completed"])
+    if tasks:
+        counter += f"  ·  задачи {tasks_done}/{len(tasks)}"
 
     side_pad = 24
     gap = 20
@@ -89,8 +98,12 @@ def render_day_card(date_str: str, habits: list[dict], state: dict[str, bool]) -
     row_h = card_h + caption_h
     rows = max(1, -(-total // GRID_COLS))  # ceil
 
+    font_task = ImageFont.truetype(str(FONT_TIME), 30)
+    task_line_h = 46
+    tasks_h = (56 + len(tasks) * task_line_h + 20) if tasks else 0
+
     header_h = 200
-    height = header_h + rows * row_h + (rows - 1) * gap + 30
+    height = header_h + rows * row_h + (rows - 1) * gap + 30 + tasks_h
 
     img = Image.new("RGB", (WIDTH, height), BG_WHITE)
     draw = ImageDraw.Draw(img)
@@ -126,6 +139,26 @@ def render_day_card(date_str: str, habits: list[dict], state: dict[str, bool]) -
             sub_x = cx + (card_w - (sub_bbox[2] - sub_bbox[0])) // 2
             sub_y = name_y + (name_bbox[3] - name_bbox[1]) + 10
             draw.text((sub_x, sub_y), subtitle, font=font_time, fill=TEXT_GRAY)
+
+    if tasks:
+        y = header_h + rows * (row_h + gap) + 10
+        draw.text((side_pad, y), "Задачи", font=font_name, fill=TEXT_BLACK)
+        y += 52
+        for t in tasks:
+            done = t["completed"]
+            colour = TASK_DONE_COLOR if done else TEXT_BLACK
+            # Drawn rather than typed: Unbounded has no check-mark glyph and
+            # renders one as a blank box.
+            cx, cy, r = side_pad + 11, y + 19, 11
+            box = [cx - r, cy - r, cx + r, cy + r]
+            if done:
+                draw.ellipse(box, fill=TASK_DONE_COLOR)
+                draw.line([cx - 5, cy, cx - 1, cy + 4], fill=BG_WHITE, width=3)
+                draw.line([cx - 1, cy + 4, cx + 5, cy - 4], fill=BG_WHITE, width=3)
+            else:
+                draw.ellipse(box, outline=(0xC8, 0xC8, 0xD0), width=3)
+            draw.text((side_pad + 38, y), t["title"], font=font_task, fill=colour)
+            y += task_line_h
 
     buf = BytesIO()
     img.save(buf, format="PNG")

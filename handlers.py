@@ -7,6 +7,7 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -24,11 +25,17 @@ from db import (
     toggle_habit,
 )
 from econ_handlers import offer_note
+import tasks_db as tdb
+from calendar_view import month_grid, parse_month
+from stats import day_status, month_overview
 from keyboards import (
+    MENU_LABELS,
+    build_calendar_keyboard,
     build_habits_keyboard,
     build_main_keyboard,
     build_site_offer_keyboard,
     build_stats_keyboard,
+    build_task_delete_keyboard,
 )
 from render import render_day_card, render_stats_card
 from stats import compute_stats
@@ -43,18 +50,27 @@ def _today() -> str:
     return datetime.now(tz).strftime("%Y-%m-%d")
 
 
+class DaySG(StatesGroup):
+    add_task = State()
+
+
 async def _render_day(date: str):
-    """Card image and keyboard for the habits scheduled on that date."""
+    """Card image and keyboard for the habits and tasks of that date."""
     habits = await get_day_habits(date)
     state = await get_day_state(date)
     skipped = await is_day_skipped(date)
-    img = render_day_card(date, habits, state)
-    kb = build_habits_keyboard(date, habits, state, skipped=skipped)
+    tasks = await tdb.get_tasks(date)
+    img = render_day_card(date, habits, state, tasks)
+    kb = build_habits_keyboard(date, habits, state, skipped=skipped, tasks=tasks)
     return img, kb
 
 
 async def send_day_card(bot: Bot, chat_id: int, date: str) -> None:
-    await ensure_day_rows(date)
+    # Rows are only pre-created from today onwards. Opening an old day from the
+    # calendar must not invent unfinished rows for it, because the statistics
+    # count every row as something that was expected that day.
+    if date >= _today():
+        await ensure_day_rows(date)
     img, kb = await _render_day(date)
     await bot.send_photo(
         chat_id=chat_id,
@@ -141,3 +157,110 @@ async def cb_skip(callback: CallbackQuery) -> None:
         "День отмечен как пропущенный — в статистику не пойдёт"
         if skipped else "День снова считается"
     )
+
+
+# --- per-day tasks -----------------------------------------------------------
+
+@router.callback_query(lambda cb: cb.data and cb.data.startswith("task:"))
+async def cb_task_toggle(callback: CallbackQuery) -> None:
+    _, date, task_id = callback.data.split(":")
+    await tdb.toggle_task(int(task_id))
+    await _update_day_message(callback, date)
+    await callback.answer()
+
+
+@router.callback_query(lambda cb: cb.data and cb.data.startswith("taskadd:"))
+async def cb_task_add(callback: CallbackQuery, state: FSMContext) -> None:
+    date = callback.data.split(":")[1]
+    await state.set_state(DaySG.add_task)
+    await state.update_data(task_date=date, day_msg_id=callback.message.message_id)
+    await callback.message.answer(f"Задача на {date}. Напиши её текстом:")
+    await callback.answer()
+
+
+@router.message(DaySG.add_task, ~F.text.in_(MENU_LABELS))
+async def input_task(message: Message, state: FSMContext) -> None:
+    title = (message.text or "").strip()
+    data = await state.get_data()
+    date = data.get("task_date")
+    await state.set_state(None)
+    if not title or not date:
+        return
+    await tdb.add_task(date, title)
+    await send_day_card(message.bot, message.chat.id, date)
+
+
+@router.callback_query(lambda cb: cb.data and cb.data.startswith("taskdel:"))
+async def cb_task_delete(callback: CallbackQuery) -> None:
+    parts = callback.data.split(":")
+    date = parts[1]
+    if len(parts) == 2:
+        tasks = await tdb.get_tasks(date)
+        if not tasks:
+            await callback.answer("Задач нет")
+            return
+        await callback.message.edit_reply_markup(
+            reply_markup=build_task_delete_keyboard(date, tasks)
+        )
+        await callback.answer("Какую убрать?")
+        return
+
+    await tdb.delete_task(int(parts[2]))
+    await _update_day_message(callback, date)
+    await callback.answer("Задача удалена")
+
+
+@router.callback_query(lambda cb: cb.data and cb.data.startswith("dayback:"))
+async def cb_day_back(callback: CallbackQuery) -> None:
+    date = callback.data.split(":")[1]
+    await _update_day_message(callback, date)
+    await callback.answer()
+
+
+# --- calendar ----------------------------------------------------------------
+
+async def _calendar_markup(year: int, month: int):
+    overview = await month_overview(year, month)
+    statuses = {day: day_status(entry) for day, entry in overview.items()}
+    return build_calendar_keyboard(
+        year, month, month_grid(year, month), statuses, _today()
+    )
+
+
+@router.message(F.text == "Календарь")
+async def btn_calendar(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    today = datetime.fromisoformat(_today())
+    await message.answer(
+        "Выбери день. Зелёный — всё закрыто, красный — пропущен.",
+        reply_markup=await _calendar_markup(today.year, today.month),
+    )
+
+
+@router.callback_query(lambda cb: cb.data and cb.data.startswith("cal:"))
+async def cb_calendar(callback: CallbackQuery) -> None:
+    parts = callback.data.split(":")
+    action = parts[1]
+
+    if action == "noop":
+        await callback.answer()
+        return
+
+    if action == "m":
+        year, month = parse_month(parts[2])
+        try:
+            await callback.message.edit_reply_markup(
+                reply_markup=await _calendar_markup(year, month)
+            )
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                raise
+        await callback.answer()
+        return
+
+    if action == "d":
+        await send_day_card(callback.bot, callback.message.chat.id, parts[2])
+        await callback.answer()
+        return
+
+    await callback.answer()

@@ -190,3 +190,69 @@ async def compute_week_summary() -> dict:
         "topics": topics,
         "skipped": sum(1 for d in skipped if monday.isoformat() <= d <= today.isoformat()),
     }
+
+
+async def month_overview(year: int, month: int) -> dict[str, dict]:
+    """Per-day figures for one month, used to colour the calendar.
+
+    Only days that actually have rows appear: a day the bot never logged is
+    absent rather than counted as a miss.
+    """
+    from calendar import monthrange
+
+    from tasks_db import tasks_by_date
+
+    first = date(year, month, 1)
+    last = date(year, month, monthrange(year, month)[1])
+    lo, hi = first.isoformat(), last.isoformat()
+
+    skipped = await get_skipped_days()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT date, COUNT(*) AS total, COALESCE(SUM(completed), 0) AS done "
+            "FROM daily_log WHERE date >= $1 AND date <= $2 GROUP BY date",
+            lo, hi,
+        )
+    tasks = await tasks_by_date(lo, hi)
+
+    overview: dict[str, dict] = {}
+    for r in rows:
+        overview[r["date"]] = {
+            "habits_done": int(r["done"]),
+            "habits_total": int(r["total"]),
+            "tasks_done": 0,
+            "tasks_total": 0,
+            "skipped": r["date"] in skipped,
+        }
+    for day, (done, total) in tasks.items():
+        entry = overview.setdefault(day, {
+            "habits_done": 0, "habits_total": 0,
+            "tasks_done": 0, "tasks_total": 0,
+            "skipped": day in skipped,
+        })
+        entry["tasks_done"] = done
+        entry["tasks_total"] = total
+
+    for day in skipped:
+        if lo <= day <= hi and day not in overview:
+            overview[day] = {
+                "habits_done": 0, "habits_total": 0,
+                "tasks_done": 0, "tasks_total": 0, "skipped": True,
+            }
+    return overview
+
+
+def day_status(entry: dict | None) -> str:
+    """'skipped', 'perfect', 'partial' or 'empty' for one calendar cell."""
+    if entry is None:
+        return "empty"
+    if entry["skipped"]:
+        return "skipped"
+    total = entry["habits_total"] + entry["tasks_total"]
+    done = entry["habits_done"] + entry["tasks_done"]
+    if total == 0:
+        return "empty"
+    if done == total:
+        return "perfect"
+    return "partial" if done else "empty"

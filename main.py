@@ -27,6 +27,7 @@ from db import (
     is_day_skipped,
 )
 from econ_db import init_econ_db
+from tasks_db import init_tasks_db
 from econ_handlers import econ_router
 from handlers import router, send_day_card
 from middleware import AccessMiddleware
@@ -99,6 +100,7 @@ async def main() -> None:
     await init_db()
     await init_clients_db()
     await init_econ_db()
+    await init_tasks_db()
 
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()

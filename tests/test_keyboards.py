@@ -25,8 +25,9 @@ class BuildHabitsKeyboardTests(TestCase):
         ]
 
     def _habit_buttons(self, keyboard):
-        # the last row is the skip-day button
-        return [b for row in keyboard.inline_keyboard[:-1] for b in row]
+        # picked by callback, so extra rows below cannot shift the selection
+        return [b for row in keyboard.inline_keyboard for b in row
+                if b.callback_data.startswith("toggle:")]
 
     def test_button_carries_the_short_label_and_the_icon(self) -> None:
         dev, sport = self._habit_buttons(build_habits_keyboard("2026-08-17", self.habits, {}))

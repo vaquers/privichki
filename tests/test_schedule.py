@@ -127,21 +127,28 @@ class KeyboardTests(TestCase):
                  "sort_order": i, "custom_emoji_id": None}
                 for i in range(n)]
 
+    def _habit_rows(self, kb):
+        return [r for r in kb.inline_keyboard
+                if all(b.callback_data.startswith("toggle:") for b in r)]
+
+    def _skip_button(self, kb):
+        return [b for r in kb.inline_keyboard for b in r
+                if b.callback_data.startswith("skip:")][0]
+
     def test_buttons_wrap_into_rows_of_three(self) -> None:
         kb = build_habits_keyboard("2026-08-17", self._habits(6), {})
-        habit_rows = kb.inline_keyboard[:-1]
-        self.assertEqual([len(r) for r in habit_rows], [3, 3])
+        self.assertEqual([len(r) for r in self._habit_rows(kb)], [3, 3])
 
     def test_five_habits_leave_a_short_second_row(self) -> None:
         kb = build_habits_keyboard("2026-08-17", self._habits(5), {})
-        self.assertEqual([len(r) for r in kb.inline_keyboard[:-1]], [3, 2])
+        self.assertEqual([len(r) for r in self._habit_rows(kb)], [3, 2])
 
     def test_skip_button_flips_with_the_day_state(self) -> None:
         kb = build_habits_keyboard("2026-08-17", self._habits(1), {})
-        self.assertEqual(kb.inline_keyboard[-1][0].callback_data, "skip:2026-08-17:1")
+        self.assertEqual(self._skip_button(kb).callback_data, "skip:2026-08-17:1")
         kb = build_habits_keyboard("2026-08-17", self._habits(1), {}, skipped=True)
-        self.assertEqual(kb.inline_keyboard[-1][0].callback_data, "skip:2026-08-17:0")
-        self.assertIn("Вернуть", kb.inline_keyboard[-1][0].text)
+        self.assertEqual(self._skip_button(kb).callback_data, "skip:2026-08-17:0")
+        self.assertIn("Вернуть", self._skip_button(kb).text)
 
     def test_main_keyboard_has_all_four_sections(self) -> None:
         labels = [b.text for row in build_main_keyboard().keyboard for b in row]
